@@ -9,5 +9,5 @@ __pycache__/
 .env
 
 # Downloaded data and run outputs (re-creatable with scripts/run_all.py)
-data/
-artifacts/
+/data/
+/artifacts/
