@@ -1,0 +1,13 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# Secrets
+.env
+
+# Downloaded data and run outputs (re-creatable with scripts/run_all.py)
+data/
+artifacts/

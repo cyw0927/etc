@@ -1,0 +1,147 @@
+# GMIA v0.2 default configuration.
+# Every run snapshots this file into artifacts/runs/<run_id>/config.yaml for reproducibility.
+
+data:
+  start: "2005-01-01"        # GLD (gold ETF) starts 2004-11; earlier data would leave gold empty
+  end: null                  # null = up to the latest *completed* bar at fetch time
+  raw_dir: data/raw
+
+# Market series from Yahoo Finance (via yfinance).
+#   calendar: "trading"  = exchange trading days only (horizon counted in trading days)
+#             "calendar" = trades every day incl. weekends (horizon counted in calendar days)
+#   close_tz / close_time: a bar dated D is treated as complete only after D close_time in close_tz (+15 min)
+#   price_type: what the series actually is (price index vs ETF vs futures vs FX rate)
+assets:
+  SPY:
+    ticker: SPY
+    name: SPDR S&P 500 ETF
+    price_type: ETF, adjusted close (dividends reinvested ≈ total return)
+    currency: USD
+    calendar: trading
+    close_tz: America/New_York
+    close_time: "16:00"
+  QQQ:
+    ticker: QQQ
+    name: Invesco QQQ (NASDAQ-100) ETF
+    price_type: ETF, adjusted close (≈ total return)
+    currency: USD
+    calendar: trading
+    close_tz: America/New_York
+    close_time: "16:00"
+  KOSPI:
+    ticker: "^KS11"
+    name: KOSPI Composite Index
+    price_type: price index (no dividends)
+    currency: KRW
+    calendar: trading
+    close_tz: Asia/Seoul
+    close_time: "15:30"
+  NIKKEI:
+    ticker: "^N225"
+    name: Nikkei 225 Index
+    price_type: price index (no dividends)
+    currency: JPY
+    calendar: trading
+    close_tz: Asia/Tokyo
+    close_time: "15:30"
+  GOLD:
+    ticker: GLD
+    name: SPDR Gold Shares ETF
+    price_type: ETF tracking gold spot (expense ratio drag), adjusted close
+    currency: USD
+    calendar: trading
+    close_tz: America/New_York
+    close_time: "16:00"
+  BTC:
+    ticker: BTC-USD
+    name: Bitcoin / US Dollar
+    price_type: spot crypto (Yahoo composite), UTC daily bars
+    currency: USD
+    calendar: calendar
+    close_tz: UTC
+    close_time: "23:59"
+  USDKRW:
+    ticker: KRW=X
+    name: USD/KRW
+    price_type: FX rate (KRW per 1 USD; up = KRW weaker)
+    currency: KRW
+    calendar: trading
+    close_tz: Europe/London
+    close_time: "23:59"
+  USDJPY:
+    ticker: JPY=X
+    name: USD/JPY
+    price_type: FX rate (JPY per 1 USD; up = JPY weaker)
+    currency: JPY
+    calendar: trading
+    close_tz: Europe/London
+    close_time: "23:59"
+  WTI:
+    ticker: CL=F
+    name: WTI crude front-month futures (continuous)
+    price_type: front-month futures, unadjusted rolls (roll jumps present; 2020-04-20 negative price)
+    currency: USD
+    calendar: trading
+    close_tz: America/New_York
+    close_time: "17:00"
+  DXY:
+    ticker: DX-Y.NYB
+    name: US Dollar Index (ICE)
+    price_type: index
+    currency: USD
+    calendar: trading
+    close_tz: America/New_York
+    close_time: "17:00"
+
+# Daily rates from FRED (public fredgraph CSV, no key).
+# Treated as known with a one-day delay: the value dated D is used only for predictions made after D.
+rates:
+  DGS2: US 2Y Treasury constant maturity yield (%)
+  DGS10: US 10Y Treasury constant maturity yield (%)
+  DFF: Effective federal funds rate (%)
+
+# Monthly macro from FRED. These are REVISED series; without release-date vintages they would leak
+# future revisions into a backtest. They are used as model inputs ONLY when FRED_API_KEY is set
+# (vintage/real-time fetch via ALFRED). Otherwise they are stored for display, flagged "analysis only".
+macro:
+  CPIAUCSL: US CPI-U, all items (index, SA)
+  UNRATE: US unemployment rate (%)
+  INDPRO: US industrial production index
+  M2SL: US M2 money stock
+
+modeling:
+  targets: [SPY, QQQ, KOSPI, NIKKEI, GOLD, BTC, USDKRW, USDJPY, WTI]
+  horizons: [5, 20]          # bars of the target's own calendar (trading days, or calendar days for BTC)
+  common_cross_assets: [SPY, DXY]
+  extra_cross_assets:
+    QQQ: [BTC]
+    KOSPI: [USDKRW]
+    NIKKEI: [USDJPY]
+    GOLD: [WTI]
+    BTC: [QQQ, GOLD]
+    USDKRW: [KOSPI]
+    USDJPY: [NIKKEI]
+    WTI: [GOLD]
+  correlation_pairs:         # 60-day rolling correlations of daily returns on a common business-day grid
+    - [QQQ, BTC]
+    - [SPY, GOLD]
+    - [DXY, GOLD]
+    - [DXY, WTI]
+    - [USDKRW, KOSPI]
+  use_rates: true
+  use_macro_vintages: auto   # auto = only if FRED_API_KEY is set
+  random_state: 42
+
+validation:
+  min_train_years: 5         # first walk-forward fold trains on at least this much history
+  val_block_years: 1         # each walk-forward validation block
+  holdout_years: 2           # most recent period, never used for model selection
+  selection_metric: brier    # chosen on walk-forward validation folds only
+
+strategy:
+  threshold: 0.5             # long when P(up) > threshold, otherwise flat (cash, 0% return)
+  execution_lag_bars: 1      # signal at close t -> position from close t+1 (conservative)
+  cost_bps: 10               # per unit of turnover (one side), covers commission + slippage
+
+reliability:
+  min_auc: 0.55              # below this the forecast is labelled "참고 신뢰도 낮음"
