@@ -124,10 +124,11 @@ def append_forecasts(
         if when < bar_completion_utc(date, specs[asset]):
             raise ValueError(f"incomplete anchor bar: {asset}/{date}")
         probs = fc["p_up_all_models"]
-        missing = set(MODELS).difference(probs)
-        if missing:
-            raise ValueError(f"candidate probabilities missing for {asset}/{h}: {sorted(missing)}")
+        # A candidate may be legitimately unavailable (e.g. H3 without historical rates).
+        # Never manufacture a probability; absent candidates retain p=1 in the 252-test family.
         for model in MODELS:
+            if model not in probs:
+                continue
             prob = float(probs[model])
             if not math.isfinite(prob) or not 0 <= prob <= 1:
                 raise ValueError(f"invalid probability for {asset}/{h}/{model}")
