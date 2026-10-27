@@ -159,7 +159,7 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 
 **신규 환경 재현:** 위 PowerShell 설치 후 `python scripts/run_all.py`로 먼저 실데이터를 수집하고 예측을 기록한다. 이후 적절한 시간 경과 후 `python scripts/fetch_data.py`로 **새로 수집한** 자료를 확보하고 `python scripts/score_ledger.py`로 채점한다. 단순히 과거 기록을 소급해 생성해서는 안 된다.
 
-**검증 상태:** GitHub 연결을 통한 소스 작성·검토까지만 수행했고, 현재 작업 세션에서는 GitHub 저장소를 실행 환경으로 다운로드할 수 없어 `pytest` 및 `run_all.py --no-fetch`를 실제로 실행하지 못했다. 통과했다고 주장하지 않으며 Windows 개발 환경에서의 확인이 남아 있다.
+**검증 상태:** GitHub Actions [GMIA unit tests 실행 #40429223134](https://github.com/cyw0927/etc/actions/runs/40429223134)에서 Python 3.12 패키지 설치·모듈 컴파일·`python -m pytest -q`가 **통과**했다(2026-10-27). 이 세션에는 사용자의 로컬 실데이터(`data/raw/`)가 없으므로 `run_all.py --no-fetch`, 실제 Yahoo/FRED 데이터 재수집, 신규 실제 예측 발행·만기 채점의 전체 실행은 **미검증**이다. Windows PC에서 추가 검증이 필요하다.
 
 ## 폴더 구조
 ```text
