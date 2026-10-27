@@ -1,7 +1,7 @@
 # GMIA — Global Macro Intelligence Agent
 
 > 실제 금융 데이터로 학습하고, **학습에 쓰지 않은 미래 구간에서 자신의 예측력을 검증하는** 개인용 글로벌 경제 예측 시스템
-> 단계: **v0.3 (보정·축소 + 사전 등록 가설 검증)** · 언어: 한국어 · Python 3.11+
+> 단계: **v0.4 (전진 검증 장부 추가, 실행 검증 대기)** · 언어: 한국어 · Python 3.11+
 
 > ⚠️ 투자 참고용 연구 도구입니다. 매수·매도 추천이 아니며 실제 주문·자동매매 기능이 없습니다. 확률은 과거 데이터로 학습한 모델 출력이며 미래를 보장하지 않습니다.
 
@@ -23,6 +23,7 @@ python -m pip install -e ".[dashboard,dev]"
 
 python scripts\run_all.py                 # 데이터 수집 → 특징변수 → 워크포워드 평가 → 최신 예측 → 보고서
 python -m pytest                          # 단위 테스트 (미래정보 유출 검사 포함)
+python scripts\score_ledger.py             # 예측 만기 후, 새로 받은 실제 데이터로 장부 채점
 streamlit run dashboard\streamlit_app.py  # 대시보드 (http://localhost:8501)
 ```
 macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 명령을 쓰면 된다.
@@ -30,7 +31,8 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 | 명령 | 하는 일 |
 |---|---|
 | `python scripts\fetch_data.py` | 데이터만 새로 받기 (`data/raw/`, 수집 요약 `data/raw/collection_summary.json`) |
-| `python scripts\run_all.py --no-fetch` | 저장된 데이터로 평가·예측만 다시 실행 |
+| `python scripts\run_all.py --no-fetch` | 저장된 데이터로 평가·예측 + 최초 예측의 append-only 기록 (중복 기록 불가) |
+| `python scripts\score_ledger.py` | 실제 만기 봉의 완료 및 새로 받은 데이터 확인 → append-only 채점, 252개 고정 비교 결과는 `data/ledger/forward_significance.csv` |
 | 결과 | `artifacts/runs/<run_id>/` (+ 최신 복사본 `artifacts/latest/`): `report.md`, `forecasts.json`, `metrics_summary.csv`, `fold_metrics.csv`, `reliability.csv`, `oos_predictions.parquet`, `equity_curves.parquet`, `config.yaml`, `run_meta.json` |
 | 로그 | `artifacts/logs/gmia.log` (수집 실패 포함) |
 
@@ -143,13 +145,30 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 
 **한계 — 홀드아웃 재사용:** 이 홀드아웃(최근 2년)은 v0.2에서 이미 집계 결과를 봤다. 앞으로 같은 기간에 후보를 계속 추가해 시험하면 우연히 좋아 보이는 결과를 찾을 위험이 커진다. 다음 판정은 **2026-10-27 이후 데이터의 전진 검증**으로 해야 한다.
 
+## v0.4 전진 검증 장부 (구현; 아직 현지 실행 검증되지 않음)
+
+기존 v0.2·v0.3의 최근 2년 홀드아웃은 여러 번 확인했으므로 새로운 가설의 검증으로 재사용하지 않는다. v0.4는 과거 성적표를 만드는 기능이 아니라 **실제 미래를 기다렸다가 채점하는 장부**다.
+
+- **사전 등록 선행:** [docs/preregistration_v0.4.md](docs/preregistration_v0.4.md) 를 코드 작성 전 별도 커밋(`331c42e`)으로 고정했다. 이후 임계값·후보·검정 방식을 성과를 보고 바꾸지 않는다.
+- **예측 기록:** `scripts/run_all.py` 실행 시 모든 **사용 가능한** 후보의 (기준일, 자산, h, 모델, 확률, 기록 UTC 시각, 코드 SHA)를 `data/ledger/forward.sqlite3`에 저장한다. 같은 키에 대해서는 **최초 기록만** 보존한다. 데이터 없는 H3 등 후보는 가짜 확률을 만들어 저장하지 않는다.
+- **만기 채점:** `python scripts/score_ledger.py` 실행 시 원자료에서 **h번째 실제 봉의 완료 시각(+15분)**을 확인한다. 기록 시각이 만기 이후라면 제외한다. 만기 뒤 새로 수집된 원자료가 있어야 처음 채점하고, 이미 채점된 결과는 이후 원자료 수정으로 덮어쓰지 않는다.
+- **평가:** 자산 9 × 기간 2 × B1 제외 후보 14 = **252개 비교**. 같은 기준일에 기록된 B1-후보 쌍이 **500개 이상, 관측 span 540일 이상**일 때만 Newey–West HAC(`lag=h`)와 BH-FDR(`q=0.10`)을 적용해 '지지됨'을 평가한다. 충족하지 않은 쌍은 p=1로 계산하여 전체 검정 수를 보존한다.
+- **대시보드:** '전진 검증' 탭에는 예측 수·만기 채점 수·Brier·표본 부족 여부·지지된 모델 수를 표시한다.
+- **변경 금지:** `data/ledger/`는 로컬 전용이며 `.gitignore` 적용 대상이다. 장부를 Git에 업로드하거나 PR #2 설명을 변경하거나 실행 스케줄을 설치하려면 사용자 결정이 필요하다.
+- **실험 정직성:** 바로 뒤에 모든 15개 모델의 확률이 기록됐다는 이유만으로 실증적 예측력이 생긴 것은 아니다. 만기된 독립적인 관측이 축적될 때까지 0개의 '지지됨'을 성능 실패라고 단정하지 않는다.
+
+**신규 환경 재현:** 위 PowerShell 설치 후 `python scripts/run_all.py`로 먼저 실데이터를 수집하고 예측을 기록한다. 이후 적절한 시간 경과 후 `python scripts/fetch_data.py`로 **새로 수집한** 자료를 확보하고 `python scripts/score_ledger.py`로 채점한다. 단순히 과거 기록을 소급해 생성해서는 안 된다.
+
+**검증 상태:** GitHub 연결을 통한 소스 작성·검토까지만 수행했고, 현재 작업 세션에서는 GitHub 저장소를 실행 환경으로 다운로드할 수 없어 `pytest` 및 `run_all.py --no-fetch`를 실제로 실행하지 못했다. 통과했다고 주장하지 않으며 Windows 개발 환경에서의 확인이 남아 있다.
+
 ## 폴더 구조
 ```text
 global-macro-intelligence-agent/
 ├── README.md · CLAUDE.md · pyproject.toml · requirements-lock.txt · .env.example · .gitignore
 ├── configs/default.yaml          # 자산·기간·검증·전략 설정 (실행마다 사본 저장)
 ├── prompts/                      # v0.1 원본 프롬프트 3개 (보존)
-├── docs/preregistration_v0.3.md  # v0.3 사전 등록 (검증 전 커밋)
+├── docs/preregistration_v0.3.md · preregistration_v0.4.md
+│                               # 모델 검증 및 전진 검증 장부 사전 등록
 ├── src/gmia/
 │   ├── data/                     # yfinance·FRED 수집, 정제, 미완성 봉 제거, 저장, 빈티지 처리
 │   ├── features/                 # 특징변수·라벨, as-of strict 조인
@@ -158,7 +177,7 @@ global-macro-intelligence-agent/
 │   ├── news/                     # 뉴스 데이터 계약·출처 정책 (미구현)
 │   ├── pipeline.py · report.py
 │   └── utils/
-├── scripts/                      # fetch_data.py, run_all.py
+├── scripts/                      # fetch_data.py, run_all.py, score_ledger.py
 ├── dashboard/                    # streamlit_app.py + app_pages/ (시장·상관·예측·백테스트·국제정세)
 └── tests/                        # 미래정보 유출·분할·정제·모델·지표·전략 테스트 (합성 데이터는 테스트 전용)
 ```
@@ -172,7 +191,7 @@ global-macro-intelligence-agent/
 | 워크포워드 + 홀드아웃, 퍼징, 지표·보정·전략 비교 | ✅ |
 | 확률 보정(Platt)·축소, 사전 등록 가설 H1~H4 (v0.3) | ✅ — 지지된 후보 0개 |
 | 기준모델 대비 HAC 검정, 다중비교 보정(BH-FDR), 계수 부호 점검 (v0.3) | ✅ |
-| 전진 검증(예측 기록 누적 후 만기 채점) | ❌ 미구현 — 다음 우선순위 |
+| 전진 검증(예측 기록 누적 후 만기 채점) | ⚠️ v0.4 코드 및 테스트 추가, 실제 Windows 실행 검증 대기 |
 | 최신 예측 출력(기준일·학습기간·성능·신뢰도) | ✅ |
 | Streamlit 대시보드 (A~E 화면) | ✅ (E는 '추후 구현' 표시) |
 | 미국 거시지표 빈티지 입력 | ⚠️ 코드·단위테스트 완료, **API 키 없이 실데이터 실행은 미검증** |
@@ -182,7 +201,7 @@ global-macro-intelligence-agent/
 | 실거래·자동주문 | 🚫 범위 밖 (구현하지 않음) |
 
 ## 다음 개발 우선순위
-1. **전진 검증 장부:** 매 실행의 예측(기준일·모델·확률)을 누적 저장하고, 만기가 된 예측을 자동 채점해 기준모델과 비교한다. 홀드아웃을 재사용하지 않는 유일한 깨끗한 검증이다.
+1. **v0.4 실제 실행 검증:** Windows에서 pytest, run_all --no-fetch, score_ledger를 실행하고 신규 실제 예측이 장부에 기록되는지 확인한다. 이후 미래 결과가 나올 때만 판정한다.
 2. 새 가설은 새 사전 등록 문서로 등록하고 전진 데이터로 판정한다. H1·H2처럼 상관된 변수 쌍은 하나로 줄여 계수 해석이 가능하게 설계한다.
 3. FRED API 키로 거시 빈티지 실행 검증, 한국은행 ECOS·일본 e-Stat 등 공식 API 추가
 4. 뉴스 모듈: 합법적 RSS 수집 → 시점 기록 저장 → 충분히 쌓인 뒤 뉴스 특징 유무 비교 실험
@@ -192,3 +211,5 @@ global-macro-intelligence-agent/
 - **v0.1 (2026-10-26)** 가상 시나리오 PoC: `prompts/` 3개 문서, 가상 실험 001 (PR #1, 미병합)
 - **v0.2 (2026-10-26)** 실데이터 예측 MVP. v0.1의 '코딩 금지·시뮬레이션 전용' 지침은 사용자 지시로 대체됐다.
 - **v0.3 (2026-10-27)** 사전 등록(`docs/preregistration_v0.3.md`) 후 보정·축소 6개와 경제 가설 4개 검증, HAC 검정·BH-FDR 도입. 지지된 후보 0개.
+
+- **v0.4 (2026-10-27)** 전진 검증 사전 등록 → 최초 발행 예측의 append-only SQLite 기록 → 별도 만기 채점 명령 → 고정 252개 검정 및 대시보드 화면 추가. **실행 검증 대기.**
