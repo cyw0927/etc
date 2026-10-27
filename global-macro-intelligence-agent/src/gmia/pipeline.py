@@ -18,6 +18,7 @@ from gmia.data import fred, market
 from gmia.evaluation.backtest import InsufficientHistory, run_walk_forward
 from gmia.features.build import build_dataset
 from gmia.evaluation.significance import sign_consistency, significance_table
+from gmia.evaluation.forward import append_forecasts, ledger_path
 from gmia.models.predict import latest_forecast, reliability_label
 from gmia.report import write_report
 from gmia.utils.logging import get_logger
@@ -122,6 +123,10 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
     pd.concat(curves).to_parquet(out_dir / "equity_curves.parquet")
     pd.DataFrame(verdicts).to_csv(out_dir / "verdicts.csv", index=False)
 
+    # Only truly issued forecasts are eligible for future forward scoring.
+    # Local SQLite unique keys retain the first forecast even when --no-fetch is rerun.
+    ledger_info = append_forecasts(ledger_path(cfg), forecasts, prices, cfg, run_id, _git_commit())
+
     run_meta = {
         "run_id": run_id, "gmia_version": __version__, "git_commit": _git_commit(),
         "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -132,7 +137,7 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
         "rates_used": sorted(inputs["rates"]), "macro_realtime_used": sorted(inputs["macro_rt"]),
         "macro_note": None if inputs["macro_rt"] else
             "US macro (CPI, unemployment, IP, M2) excluded from models: no release-date vintages (set FRED_API_KEY)",
-        "skipped": skipped, "disclaimer": DISCLAIMER,
+        "skipped": skipped, "forward_ledger": ledger_info, "disclaimer": DISCLAIMER,
     }
     (out_dir / "run_meta.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     (out_dir / "forecasts.json").write_text(json.dumps(forecasts, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
