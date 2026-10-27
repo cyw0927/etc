@@ -1,4 +1,5 @@
 import altair as alt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -54,8 +55,9 @@ with col1, st.container(border=True, height="stretch"):
                f"(지연 {cfg['strategy']['execution_lag_bars']}봉), 회전당 비용 {cfg['strategy']['cost_bps']}bp. "
                "예측 성능과 별개인 참고 지표입니다.")
     c = curves[(curves["target"] == target) & (curves["horizon"] == horizon) & (curves["kind"] == kind)]
-    models = st.pills("모델", list(dd.MODEL_LABELS), default=[v["selected_model"], "logistic_regression"],
-                      selection_mode="multi", format_func=dd.MODEL_LABELS.get)
+    available = [m for m in dd.MODEL_LABELS if m in set(c["model"])]
+    models = st.multiselect("모델", available, default=list(dict.fromkeys([v["selected_model"], "logistic_regression"])),
+                            format_func=dd.MODEL_LABELS.get)
     lines = [c[c["model"] == m][["date", "strategy_net"]].assign(series=dd.MODEL_LABELS[m]) for m in models or []]
     bh = c[c["model"] == "baseline_base_rate"][["date", "buy_and_hold"]].rename(columns={"buy_and_hold": "strategy_net"})
     lines.append(bh.assign(series="매수 후 보유"))
@@ -96,3 +98,39 @@ with st.container(border=True):
         alt="폴드별 성능 추이")
     st.markdown(f"**실패한 시기** (선택 모델의 AUC<0.5 또는 기준모델보다 나쁜 Brier): "
                 f"{', '.join(v['failed_folds']) or '없음'}")
+
+sig = art["significance"]
+if not sig.empty:
+    with st.container(border=True):
+        st.subheader("사전 등록 판정: 홀드아웃에서 B1보다 나은가")
+        n_tests, q = len(sig), sig["fdr_q"].iloc[0]
+        st.caption(f"관측별 Brier 차이(후보 − B1)의 평균을 Newey–West(시차 = h) 표준오차로 단측 검정하고, 전체 {n_tests}개 검정에 "
+                   f"Benjamini–Hochberg FDR q = {q}를 적용했습니다. '지지됨' = BH 유의 + 검증 구간에서도 B1보다 나음. "
+                   "이 홀드아웃은 v0.2에서 이미 본 기간이라 지지된 결과도 잠정입니다.")
+        with st.container(horizontal=True):
+            st.metric("전체 지지됨", f"{int(sig['supported'].sum())} / {n_tests}", border=True)
+            st.metric("BH 유의", int(sig["bh_significant"].sum()), border=True)
+            st.metric("보정 전 p < 0.05", int((sig["p_one_sided"] < 0.05).sum()), border=True)
+        cur = sig[(sig["target"] == target) & (sig["horizon"] == horizon)].copy()
+        cur["모델"] = cur["model"].map(dd.MODEL_LABELS)
+        st.dataframe(
+            cur.sort_values("p_one_sided")[["모델", "mean_brier_diff", "t_stat", "p_one_sided", "p_bh_adjusted",
+                                            "validation_beats_base_rate", "supported"]],
+            hide_index=True, alt=f"{target} {horizon}봉 후보별 홀드아웃 유의성",
+            column_config={"mean_brier_diff": st.column_config.NumberColumn("Brier 차이(−가 좋음)", format="%+.4f"),
+                           "t_stat": st.column_config.NumberColumn("HAC t", format="%.2f"),
+                           "p_one_sided": st.column_config.NumberColumn("p(단측)", format="%.4f"),
+                           "p_bh_adjusted": st.column_config.NumberColumn("p(BH)", format="%.3f"),
+                           "validation_beats_base_rate": st.column_config.CheckboxColumn("검증도 B1보다 나음"),
+                           "supported": st.column_config.CheckboxColumn("지지됨")})
+        signs = art["signs"]
+        if not signs.empty:
+            sc = signs[(signs["target"] == target) & (signs["horizon"] == horizon)].copy()
+            if not sc.empty:
+                sc["가설"] = sc["model"].map(dd.MODEL_LABELS)
+                sc["기대 부호"] = np.where(sc["expected_sign"] > 0, "+", "−")
+                st.markdown("**가설 계수 부호 일치** (검증 폴드 중 사전 기대 부호와 같은 비율)")
+                st.dataframe(sc[["가설", "feature", "기대 부호", "share_expected_sign", "mean_coef", "n_folds"]],
+                             hide_index=True, alt="가설 계수 부호 일치",
+                             column_config={"share_expected_sign": st.column_config.NumberColumn("일치 비율", format="percent"),
+                                            "mean_coef": st.column_config.NumberColumn("평균 계수", format="%+.3f")})

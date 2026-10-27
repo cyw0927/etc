@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gmia"
-version = "0.2.0"
+version = "0.3.0"
 description = "Global Macro Intelligence Agent — real-data direction-probability models with walk-forward validation (research use only, no trading)."
 readme = "README.md"
 requires-python = ">=3.11"

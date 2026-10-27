@@ -17,7 +17,8 @@ from gmia.config import ARTIFACTS_DIR, PROJECT_ROOT, asset_specs
 from gmia.data import fred, market
 from gmia.evaluation.backtest import InsufficientHistory, run_walk_forward
 from gmia.features.build import build_dataset
-from gmia.models.predict import latest_forecast
+from gmia.evaluation.significance import sign_consistency, significance_table
+from gmia.models.predict import latest_forecast, reliability_label
 from gmia.report import write_report
 from gmia.utils.logging import get_logger
 
@@ -64,6 +65,7 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
     prices, specs, m = inputs["prices"], asset_specs(cfg), cfg["modeling"]
 
     summaries, fold_metrics, preds, reliab, curves, forecasts, verdicts, skipped = [], [], [], [], [], [], [], []
+    coefs = []
     for target in m["targets"]:
         if target not in prices:
             skipped.append({"target": target, "reason": "data unavailable"})
@@ -83,6 +85,8 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
                                       ("predictions", res["predictions"], preds), ("reliability", res["reliability"], reliab),
                                       ("curves", res["curves"], curves)):
                 sink.append(frame.assign(**tag))
+            if not res["coefficients"].empty:
+                coefs.append(res["coefficients"].assign(**tag))
             fc = latest_forecast(ds, feats, h, res["verdict"], cfg)
             spec = specs[target]
             fc.update({"target": target, "name": spec.name, "ticker": spec.ticker, "price_type": spec.price_type,
@@ -90,11 +94,30 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
                        "data_last_date": prices[target].index.max().strftime("%Y-%m-%d"),
                        "n_features": len(feats), "features": feats, "verdict": res["verdict"]})
             forecasts.append(fc)
-            verdicts.append({**tag, **res["verdict"]})
 
-    pd.concat(summaries).to_csv(out_dir / "metrics_summary.csv", index=False)
+    summary_all, preds_all = pd.concat(summaries), pd.concat(preds)
+    sig = significance_table(preds_all, summary_all, q=cfg["validation"].get("fdr_q", 0.10))
+    sig.to_csv(out_dir / "significance.csv", index=False)
+    coef_all = pd.concat(coefs) if coefs else pd.DataFrame()
+    if not coef_all.empty:
+        coef_all.to_csv(out_dir / "coefficients.csv", index=False)
+        sign_consistency(coef_all).to_csv(out_dir / "sign_consistency.csv", index=False)
+    sig_idx = sig.set_index(["target", "horizon", "model"])
+    for fc in forecasts:
+        v = fc["verdict"]
+        key = (fc["target"], fc["horizon"], v["selected_model"])
+        if key in sig_idx.index:
+            row = sig_idx.loc[key]
+            v.update({"selected_p_one_sided": float(row["p_one_sided"]), "selected_p_bh": float(row["p_bh_adjusted"]),
+                      "selected_supported": bool(row["supported"])})
+        else:  # B1 itself
+            v.update({"selected_p_one_sided": None, "selected_p_bh": None, "selected_supported": False})
+        fc["reliability"] = reliability_label(v, cfg["reliability"]["min_auc"])
+        verdicts.append({"target": fc["target"], "horizon": fc["horizon"], **v})
+
+    summary_all.to_csv(out_dir / "metrics_summary.csv", index=False)
     pd.concat(fold_metrics).to_csv(out_dir / "fold_metrics.csv", index=False)
-    pd.concat(preds).to_parquet(out_dir / "oos_predictions.parquet")
+    preds_all.to_parquet(out_dir / "oos_predictions.parquet")
     pd.concat(reliab).to_csv(out_dir / "reliability.csv", index=False)
     pd.concat(curves).to_parquet(out_dir / "equity_curves.parquet")
     pd.DataFrame(verdicts).to_csv(out_dir / "verdicts.csv", index=False)
@@ -115,7 +138,7 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
     (out_dir / "forecasts.json").write_text(json.dumps(forecasts, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     with open(out_dir / "config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump({k: v for k, v in cfg.items() if not k.startswith("_")}, f, allow_unicode=True, sort_keys=False)
-    write_report(out_dir, forecasts, pd.concat(summaries), run_meta)
+    write_report(out_dir, forecasts, summary_all, run_meta, sig, coef_all)
 
     latest = ARTIFACTS_DIR / "latest"
     if latest.exists():

@@ -30,6 +30,7 @@ for fc in fcs:
         "학습기간": f"{fc['train_start']} ~ {fc['train_end']}", "홀드아웃 Brier": v["holdout_brier"],
         "기준모델 Brier": v["holdout_brier_base_rate"], "홀드아웃 AUC": v["holdout_auc"],
         "기준모델 대비": "개선" if v["holdout_beats_base_rate"] else "미달/동일",
+        "p(BH)": v.get("selected_p_bh"),
         "입력 완전성": fc["feature_completeness"], "신뢰도": fc["reliability"],
     })
 st.dataframe(
@@ -39,6 +40,7 @@ st.dataframe(
         "홀드아웃 Brier": st.column_config.NumberColumn(format="%.4f"),
         "기준모델 Brier": st.column_config.NumberColumn(format="%.4f"),
         "홀드아웃 AUC": st.column_config.NumberColumn(format="%.3f"),
+        "p(BH)": st.column_config.NumberColumn(format="%.3f", help="홀드아웃에서 B1보다 낫다는 검정의 다중비교 보정 p값"),
         "입력 완전성": st.column_config.NumberColumn(format="percent"),
         "신뢰도": st.column_config.TextColumn(width="large"),
     },

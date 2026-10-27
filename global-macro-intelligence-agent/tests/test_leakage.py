@@ -22,7 +22,9 @@ def test_changing_future_prices_does_not_change_past_features(prices):
     for k in shocked:  # wreck every series strictly after t
         shocked[k].loc[shocked[k].index > t, ["close", "adj_close"]] *= 3.0
     after, feats = build_dataset("AAA", shocked, [5, 20], ["BBB", "CCC"], [["AAA", "CCC"]])
-    pd.testing.assert_frame_equal(base.loc[:t, feats], after.loc[:t, feats])
+    inputs = [c for c in base.columns if not c.startswith(("y_", "fwd_ret_", "label_end_", "ret_next"))]
+    assert {"mom_12_1", "ma_gap_200", "vol_ratio"} <= set(inputs)  # v0.3 hypothesis features are checked too
+    pd.testing.assert_frame_equal(base.loc[:t, inputs], after.loc[:t, inputs])
 
 
 def test_other_assets_are_joined_strictly_before_target_date(prices):

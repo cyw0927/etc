@@ -6,13 +6,8 @@ from pathlib import Path
 
 import pandas as pd
 
-MODEL_LABELS = {
-    "baseline_base_rate": "B1 과거 상승비율",
-    "baseline_momentum": "B2 모멘텀 규칙",
-    "logistic_regression": "M1 로지스틱 회귀",
-    "hist_gradient_boosting": "M2 HistGradientBoosting",
-    "lightgbm": "M3 LightGBM",
-}
+from gmia.models.registry import MODEL_LABELS
+
 
 
 def _pct(x) -> str:
@@ -49,7 +44,45 @@ def model_table(summary: pd.DataFrame, target: str, h: int) -> str:
     return "\n".join(lines)
 
 
-def write_report(out_dir: Path, forecasts: list[dict], summary: pd.DataFrame, run_meta: dict) -> None:
+def significance_section(sig: pd.DataFrame, coefs: pd.DataFrame) -> list[str]:
+    from gmia.evaluation.significance import sign_consistency
+
+    n, q = len(sig), sig["fdr_q"].iloc[0]
+    sup = sig[sig["supported"]]
+    lines = ["## 사전 등록 판정 (docs/preregistration_v0.3.md)", "",
+             f"- 검정 수: {n}개 (B1 제외 후보 × 자산 × 기간), Benjamini–Hochberg FDR q = {q}",
+             f"- 홀드아웃 Brier가 B1보다 낮은 조합: {int((sig['mean_brier_diff'] < 0).sum())}개 · "
+             f"보정 전 p < 0.05: {int((sig['p_one_sided'] < 0.05).sum())}개 · "
+             f"BH 유의: {int(sig['bh_significant'].sum())}개 · **지지됨(BH 유의 + 검증도 B1보다 나음): {len(sup)}개**",
+             "- 주의: 이 홀드아웃 기간의 집계 결과는 v0.2에서 이미 공개됐다. 지지된 결과도 전진 검증 전까지 잠정이다.", ""]
+    if len(sup):
+        lines += ["| 자산 | h | 모델 | 홀드아웃 Brier 차이 | HAC t | p(단측) | p(BH) |", "|---|---|---|---|---|---|---|"]
+        for _, r in sup.sort_values("p_one_sided").iterrows():
+            lines.append(f"| {r['target']} | {r['horizon']} | {MODEL_LABELS.get(r['model'], r['model'])} | "
+                         f"{r['mean_brier_diff']:+.4f} | {r['t_stat']:.2f} | {r['p_one_sided']:.4f} | {r['p_bh_adjusted']:.3f} |")
+        lines.append("")
+    top = sig.sort_values("p_one_sided").head(10)
+    lines += ["보정 전 p값이 가장 작은 10개 (참고):", "",
+              "| 자산 | h | 모델 | Brier 차이 | p(단측) | p(BH) | 검증도 B1보다 나음 |", "|---|---|---|---|---|---|---|"]
+    for _, r in top.iterrows():
+        lines.append(f"| {r['target']} | {r['horizon']} | {MODEL_LABELS.get(r['model'], r['model'])} | "
+                     f"{r['mean_brier_diff']:+.4f} | {r['p_one_sided']:.4f} | {r['p_bh_adjusted']:.3f} | "
+                     f"{'예' if r['validation_beats_base_rate'] else '아니오'} |")
+    lines.append("")
+    if not coefs.empty:
+        sc = sign_consistency(coefs)
+        if not sc.empty:
+            lines += ["### 가설 계수 부호 일치 (검증 폴드 중 사전 기대 부호와 같은 비율)", "",
+                      "| 가설 | 특징 | 기대 부호 | 자산 | h | 일치 비율 | 평균 계수(표준화) |", "|---|---|---|---|---|---|---|"]
+            for _, r in sc.iterrows():
+                lines.append(f"| {MODEL_LABELS.get(r['model'], r['model'])} | {r['feature']} | {'+' if r['expected_sign'] > 0 else '−'} | "
+                             f"{r['target']} | {r['horizon']} | {_pct(r['share_expected_sign'])} | {r['mean_coef']:+.3f} |")
+            lines.append("")
+    return lines
+
+
+def write_report(out_dir: Path, forecasts: list[dict], summary: pd.DataFrame, run_meta: dict,
+                 sig: pd.DataFrame | None = None, coefs: pd.DataFrame | None = None) -> None:
     parts = [
         f"# GMIA 실행 보고서 — run `{run_meta['run_id']}`",
         "",
@@ -64,13 +97,17 @@ def write_report(out_dir: Path, forecasts: list[dict], summary: pd.DataFrame, ru
         parts.append(f"- 예측 불가/건너뜀: {run_meta['skipped']}")
     parts += ["", "## 최신 예측", "", forecast_table(forecasts), "",
               "- P(상승) = 예측 기준일 종가 대비 h봉 뒤 종가가 높을 확률(모델 출력). 주식·ETF·FX·원유는 거래일, BTC는 달력일.",
-              "- 신뢰도는 홀드아웃(최근 2년, 모델 선택에 미사용) 성과로 정한다. '보통'이 최고 등급이다.", ""]
+              "- 신뢰도는 홀드아웃(최근 2년, 모델 선택에 미사용) 성과와 다중비교 보정 검정으로 정한다. '보통(잠정)'이 최고 등급이다.", ""]
+    if sig is not None and not sig.empty:
+        parts += significance_section(sig, coefs if coefs is not None else pd.DataFrame())
     parts += ["## 모델별 성능 (검증 = 워크포워드 검증 구간 합산, holdout = 최근 2년)", ""]
     for fc in forecasts:
         v = fc["verdict"]
         parts += [f"### {fc['target']} · {fc['horizon']} {fc['horizon_unit']}", "",
                   f"- 학습 기간(최종 예측용): {fc['train_start']} ~ {fc['train_end']} ({fc['n_train']}개 표본), 데이터 기준일 {fc['data_last_date']}",
-                  f"- 선택 모델: {MODEL_LABELS.get(v['selected_model'], v['selected_model'])} (검증 Brier 최소)",
+                  f"- 선택 모델: {MODEL_LABELS.get(v['selected_model'], v['selected_model'])} (검증 Brier 최소)"
+                  + (f" · 홀드아웃 B1 대비 p(단측) {v['selected_p_one_sided']:.3f}, p(BH) {v['selected_p_bh']:.3f}"
+                     if v.get("selected_p_one_sided") is not None else ""),
                   f"- 홀드아웃에서 B1 대비 개선: {'예' if v['holdout_beats_base_rate'] else '**아니오**'} · B2 대비 개선: {'예' if v['holdout_beats_momentum'] else '**아니오**'}",
                   f"- 검증 폴드 중 B1보다 Brier가 좋았던 비율: {_pct(v['share_val_folds_beating_base_rate'])} ({v['n_validation_folds']}개 폴드)",
                   f"- 실패 구간(AUC<0.5 또는 B1보다 나쁨): {', '.join(v['failed_folds']) or '없음'}",

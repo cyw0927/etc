@@ -9,6 +9,7 @@ import streamlit as st
 
 from gmia.config import ARTIFACTS_DIR, load_config
 from gmia.data import fred, market
+from gmia.models.registry import MODEL_LABELS  # noqa: F401  (re-exported for pages)
 
 LATEST = ARTIFACTS_DIR / "latest"
 
@@ -53,13 +54,12 @@ def run_artifacts() -> dict:
         "folds": pd.read_csv(LATEST / "fold_metrics.csv", parse_dates=["test_start", "test_end"]),
         "reliability": pd.read_csv(LATEST / "reliability.csv"),
         "curves": pd.read_parquet(LATEST / "equity_curves.parquet"),
+        "significance": _optional_csv("significance.csv"),
+        "signs": _optional_csv("sign_consistency.csv"),
     }
 
 
-MODEL_LABELS = {
-    "baseline_base_rate": "B1 과거 상승비율",
-    "baseline_momentum": "B2 모멘텀 규칙",
-    "logistic_regression": "M1 로지스틱 회귀",
-    "hist_gradient_boosting": "M2 HistGradientBoosting",
-    "lightgbm": "M3 LightGBM",
-}
+def _optional_csv(name: str) -> pd.DataFrame:
+    path = LATEST / name
+    return pd.read_csv(path) if path.exists() else pd.DataFrame()
+

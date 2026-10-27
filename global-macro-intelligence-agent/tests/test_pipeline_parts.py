@@ -86,7 +86,7 @@ def test_strategy_uses_lagged_signal_and_costs():
 def test_models_handle_feature_missing_in_early_window(prices):
     X = pd.DataFrame({"ret_5": np.random.default_rng(0).normal(size=500), "late": np.nan})
     y = pd.Series(np.random.default_rng(1).integers(0, 2, 500), dtype=float)
-    for m in make_models(5):
+    for m in make_models(5, ["ret_5", "late"], hypotheses=False):
         p = m.fit(X, y).predict_proba(X)
         assert np.all((p > 0) & (p < 1))
 
@@ -96,7 +96,8 @@ def test_walk_forward_end_to_end_on_synthetic(prices, cfg):
     res = run_walk_forward(ds, feats, 5, cfg)
     s = res["summary"]
     assert set(s["kind"]) == {"validation", "holdout"}
-    assert set(s["model"]) == {m.name for m in make_models(5)}
+    assert set(s["model"]) == {m.name for m in make_models(5, feats, available=set(ds.columns))}
+    assert "h1_trend" in set(s["model"]) and "h3_rates_regime" not in set(s["model"])  # no rates in synthetic data
     # random-walk data has no signal: no model should look meaningfully skilful out of sample
     hold = s[s["kind"] == "holdout"].set_index("model")
     assert (hold["roc_auc"].dropna() < 0.62).all()

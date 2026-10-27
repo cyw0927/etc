@@ -45,6 +45,25 @@ def own_features(px: pd.DataFrame) -> pd.DataFrame:
     return f
 
 
+def hypothesis_own_features(px: pd.DataFrame) -> pd.DataFrame:
+    """Long-window own features for the pre-registered hypotheses (not given to the v0.2 models)."""
+    c = px["adj_close"]
+    r1 = c.pct_change(fill_method=None)
+    f = pd.DataFrame(index=px.index)
+    f["mom_12_1"] = c.shift(21) / c.shift(252) - 1
+    f["ma_gap_200"] = c / c.rolling(200).mean() - 1
+    vol_252 = r1.rolling(252).std()
+    f["vol_ratio"] = r1.rolling(20).std() / vol_252
+    return f
+
+
+def hypothesis_rate_features(rates: dict[str, pd.Series]) -> pd.DataFrame:
+    if "DGS2" not in rates or "DGS10" not in rates:
+        return pd.DataFrame()
+    r = pd.concat([rates["DGS2"].rename("us2y"), rates["DGS10"].rename("us10y")], axis=1).dropna()
+    return pd.DataFrame({"us2y_chg60": r["us2y"].diff(60), "us10y_chg60": r["us10y"].diff(60)})
+
+
 def asof_strict(target_index: pd.DatetimeIndex, series: pd.DataFrame) -> pd.DataFrame:
     """Values of `series` as of the last date strictly before each target date."""
     left = pd.DataFrame({"date": target_index.values})
@@ -150,7 +169,13 @@ def build_dataset(
 
     parts = [own] + [asof_strict(px.index, e) for e in external]
     feats = pd.concat(parts, axis=1)
-    feature_cols = list(feats.columns)
-    ds = pd.concat([feats, make_labels(px["adj_close"], horizons)], axis=1)
+    feature_cols = list(feats.columns)  # the v0.2 feature set given to B2 and M1–M3
+    extra = [hypothesis_own_features(px)]
+    hyp_rates = hypothesis_rate_features(rates or {})
+    if not hyp_rates.empty:
+        extra.append(asof_strict(px.index, hyp_rates))
+    extra = pd.concat(extra, axis=1)
+    extra = extra[[c for c in extra.columns if c not in feats.columns]]
+    ds = pd.concat([feats, extra, make_labels(px["adj_close"], horizons)], axis=1)
     ds = ds.loc[own[OWN_FEATURES].notna().all(axis=1)]  # warm-up: need 60 bars of own history
     return ds, feature_cols

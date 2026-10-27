@@ -12,7 +12,7 @@ import pandas as pd
 from gmia.evaluation.metrics import classification_metrics, reliability_table
 from gmia.evaluation.splits import make_folds
 from gmia.evaluation.strategy import long_flat_backtest
-from gmia.models.registry import BASELINES, make_models
+from gmia.models.registry import BASELINES, make_models, required_columns
 
 
 class InsufficientHistory(ValueError):
@@ -31,12 +31,20 @@ def run_walk_forward(ds: pd.DataFrame, feature_cols: list[str], h: int, cfg: dic
     if not any(f.kind == "validation" for f in folds) or not any(f.kind == "holdout" for f in folds):
         raise InsufficientHistory(f"not enough history for walk-forward validation ({len(lab)} labelled rows)")
 
-    X, y = lab[feature_cols], lab[f"y_{h}"]
-    preds, fold_rows = [], []
+    m_cfg = cfg["modeling"]
+    model_kw = {"random_state": m_cfg["random_state"], "hypotheses": m_cfg.get("hypotheses", True),
+                "calibrated": m_cfg.get("calibrated", True), "available": set(ds.columns)}
+    cols = required_columns(make_models(h, feature_cols, **model_kw))
+    X, y, label_end = lab[cols], lab[f"y_{h}"], lab[f"label_end_{h}"]
+    preds, fold_rows, coef_rows = [], [], []
     for fold in folds:
-        for model in make_models(h, cfg["modeling"]["random_state"]):
-            model.fit(X.loc[fold.train_index], y.loc[fold.train_index])
+        for model in make_models(h, feature_cols, **model_kw):
+            model.fit(X.loc[fold.train_index], y.loc[fold.train_index], label_end=label_end.loc[fold.train_index])
             p = model.predict_proba(X.loc[fold.test_index])
+            coefs = getattr(model, "coefficients", None)
+            if coefs:
+                coef_rows += [{"fold": fold.name, "kind": fold.kind, "model": model.name, "feature": f, "coef": c}
+                              for f, c in coefs.items()]
             preds.append(pd.DataFrame({
                 "date": fold.test_index, "fold": fold.name, "kind": fold.kind, "model": model.name, "p": p,
                 "y": y.loc[fold.test_index].values, "fwd_ret": lab.loc[fold.test_index, f"fwd_ret_{h}"].values,
@@ -97,5 +105,5 @@ def run_walk_forward(ds: pd.DataFrame, feature_cols: list[str], h: int, cfg: dic
         "folds": [f.describe() for f in folds],
         "fold_metrics": fold_metrics, "summary": summary, "predictions": preds,
         "reliability": pd.concat(reliab, ignore_index=True), "curves": pd.concat(curves, ignore_index=True),
-        "verdict": verdict, "bars_per_year": bpy,
+        "verdict": verdict, "bars_per_year": bpy, "coefficients": pd.DataFrame(coef_rows),
     }

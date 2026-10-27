@@ -130,6 +130,8 @@ modeling:
     - [USDKRW, KOSPI]
   use_rates: true
   use_macro_vintages: auto   # auto = only if FRED_API_KEY is set
+  calibrated: true           # v0.3: shrinkage / Platt variants of M1–M3 (docs/preregistration_v0.3.md)
+  hypotheses: true           # v0.3: pre-registered hypothesis models H1–H4
   random_state: 42
 
 validation:
@@ -137,6 +139,7 @@ validation:
   val_block_years: 1         # each walk-forward validation block
   holdout_years: 2           # most recent period, never used for model selection
   selection_metric: brier    # chosen on walk-forward validation folds only
+  fdr_q: 0.10                # Benjamini–Hochberg over all non-B1 holdout tests (pre-registered)
 
 strategy:
   threshold: 0.5             # long when P(up) > threshold, otherwise flat (cash, 0% return)
