@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -96,6 +97,16 @@ def connect(path: Path) -> sqlite3.Connection:
     return db
 
 
+@contextmanager
+def db_session(path: Path):
+    db = connect(path)
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
+
+
 def append_forecasts(
     path: Path, forecasts: list[dict], prices: dict[str, pd.DataFrame], cfg: dict,
     run_id: str, git_commit: str | None, recorded_utc: datetime | None = None,
@@ -134,7 +145,7 @@ def append_forecasts(
                 raise ValueError(f"invalid probability for {asset}/{h}/{model}")
             rows.append((date, asset, h, model, prob, when.isoformat(),
                          git_commit, run_id, anchor, specs[asset].currency))
-    with connect(path) as db:
+    with db_session(path) as db:
         before = db.total_changes
         db.executemany("""
             INSERT OR IGNORE INTO forecasts
@@ -160,7 +171,7 @@ def score_pending(
     specs = asset_specs(cfg)
     stats = {"pending": 0, "scored": 0, "late_excluded": 0, "not_mature": 0,
              "stale_source": 0, "missing_data": 0, "invalid": 0}
-    with connect(path) as db:
+    with db_session(path) as db:
         pending = db.execute("""
             SELECT f.forecast_date, f.asset, f.horizon, f.model, f.recorded_utc
             FROM forecasts f
@@ -218,14 +229,14 @@ def score_pending(
 def read_forecasts(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
-    with connect(path) as db:
+    with db_session(path) as db:
         return pd.read_sql_query("SELECT * FROM forecasts ORDER BY forecast_date, asset, horizon, model", db)
 
 
 def read_scores(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
-    with connect(path) as db:
+    with db_session(path) as db:
         return pd.read_sql_query("""
             SELECT f.forecast_date, f.asset, f.horizon, f.model, f.probability,
                    f.recorded_utc, f.git_commit, s.label_end, s.y,
