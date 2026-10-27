@@ -12,6 +12,7 @@ page = st.navigation(
         st.Page("app_pages/correlation.py", title="자산 상관관계", icon=":material/grid_on:"),
         st.Page("app_pages/forecast.py", title="예측모델", icon=":material/insights:"),
         st.Page("app_pages/backtest.py", title="백테스트", icon=":material/history:"),
+        st.Page("app_pages/forward.py", title="전진 검증", icon=":material/event_available:"),
         st.Page("app_pages/news.py", title="국제정세", icon=":material/newspaper:"),
     ],
     position="top",
