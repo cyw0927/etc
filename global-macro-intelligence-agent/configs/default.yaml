@@ -148,3 +148,8 @@ strategy:
 
 reliability:
   min_auc: 0.55              # below this the forecast is labelled "참고 신뢰도 낮음"
+
+# v0.4 forward-test ledger. Prediction rows and results are local and append-only.
+# Statistical thresholds/candidate universe are frozen in docs/preregistration_v0.4.md
+forward_test:
+  ledger_path: data/ledger/forward.sqlite3
