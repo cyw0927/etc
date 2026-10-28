@@ -173,6 +173,7 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 - **사전 등록 선행:** [docs/preregistration_v0.4.md](docs/preregistration_v0.4.md) 를 코드 작성 전 별도 커밋(`331c42e`)으로 고정했다. 이후 임계값·후보·검정 방식을 성과를 보고 바꾸지 않는다.
 - **예측 기록:** `scripts/run_all.py` 실행 시 모든 **사용 가능한** 후보의 (기준일, 자산, h, 모델, 확률, 기록 UTC 시각, 코드 SHA)를 `data/ledger/forward.sqlite3`에 저장한다. 같은 키에 대해서는 **최초 기록만** 보존한다. 데이터 없는 H3 등 후보는 가짜 확률을 만들어 저장하지 않는다.
 - **만기 채점:** `python scripts/score_ledger.py` 실행 시 원자료에서 **h번째 실제 봉의 완료 시각(+15분)**을 확인한다. 기록 시각이 만기 이후라면 제외한다. 만기 뒤 새로 수집된 원자료가 있어야 처음 채점하고, 이미 채점된 결과는 이후 원자료 수정으로 덮어쓰지 않는다.
+- **발행 적시성 (v0.4.1):** 기록 시각이 **기준일 다음 봉의 완료 시각 이후**인 예측은 '늦은 발행(`stale_issue_excluded`)'으로 채점과 통계에서 영구 제외한다. 결과 경로의 일부가 이미 공개된 뒤 기록된 예측이기 때문이다. 오래된 데이터로 `run_all --no-fetch`를 다시 돌려 생긴 예측이 여기에 해당한다. 기록은 감사용으로 남는다. 규칙은 코드 변경 전에 [docs/preregistration_v0.4.1.md](docs/preregistration_v0.4.1.md)(`1092429`)로 등록했다. 등록 시점에 알려진 장부의 채점 행은 0개였다.
 - **평가:** 자산 9 × 기간 2 × B1 제외 후보 14 = **252개 비교**. 같은 기준일에 기록된 B1-후보 쌍이 **500개 이상, 관측 span 540일 이상**일 때만 Newey–West HAC(`lag=h`)와 BH-FDR(`q=0.10`)을 적용해 '지지됨'을 평가한다. 충족하지 않은 쌍은 p=1로 계산하여 전체 검정 수를 보존한다.
 - **대시보드:** '전진 검증' 탭에는 예측 수·만기 채점 수·Brier·표본 부족 여부·지지된 모델 수를 표시한다.
 - **변경 금지:** `data/ledger/`는 로컬 전용이며 `.gitignore` 적용 대상이다. 장부를 Git에 업로드하거나 PR #2 설명을 변경하거나 실행 스케줄을 설치하려면 사용자 결정이 필요하다.
@@ -188,7 +189,7 @@ global-macro-intelligence-agent/
 ├── README.md · CLAUDE.md · pyproject.toml · requirements-lock.txt · .env.example · .gitignore
 ├── configs/default.yaml          # 자산·기간·검증·전략 설정 (실행마다 사본 저장)
 ├── prompts/                      # v0.1 원본 프롬프트 3개 (보존)
-├── docs/preregistration_v0.3.md · preregistration_v0.4.md
+├── docs/preregistration_v0.3.md · preregistration_v0.4.md · preregistration_v0.4.1.md
 │                               # 모델 검증 및 전진 검증 장부 사전 등록
 ├── src/gmia/
 │   ├── data/                     # yfinance·FRED 수집, 정제, 미완성 봉 제거, 저장, 빈티지 처리
@@ -234,3 +235,4 @@ global-macro-intelligence-agent/
 - **v0.3 (2026-10-27)** 사전 등록(`docs/preregistration_v0.3.md`) 후 보정·축소 6개와 경제 가설 4개 검증, HAC 검정·BH-FDR 도입. 지지된 후보 0개.
 
 - **v0.4 (2026-10-27)** 전진 검증 사전 등록 → 최초 발행 예측의 append-only SQLite 기록 → 별도 만기 채점 명령 → 고정 252개 검정 및 대시보드 화면 추가. **실행 검증 대기.**
+- **v0.4.1 (2026-10-28)** 독립 검증에서 늦게 기록된 예측(기준일 24일 뒤, 20봉 중 18봉 공개 후)이 채점되는 빈틈을 발견했다. 사전 등록(`docs/preregistration_v0.4.1.md`) 후 '발행 적시성' 채점 규칙과 테스트 4개를 추가했다.

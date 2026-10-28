@@ -174,11 +174,13 @@ def score_pending(
 
     Late predictions and premature/stale/invalid observations remain unscored.
     Scores are immutable: future vendor revisions must never rewrite previously scored rows.
+    v0.4.1 (docs/preregistration_v0.4.1.md): a forecast recorded at or after the completion of
+    the bar FOLLOWING its forecast date is a stale issue and is never scored.
     """
     when = utc_time(now_utc or datetime.now(timezone.utc))
     specs = asset_specs(cfg)
-    stats = {"pending": 0, "scored": 0, "late_excluded": 0, "not_mature": 0,
-             "stale_source": 0, "missing_data": 0, "invalid": 0}
+    stats = {"pending": 0, "scored": 0, "late_excluded": 0, "stale_issue_excluded": 0,
+             "not_mature": 0, "stale_source": 0, "missing_data": 0, "invalid": 0}
     with db_session(path) as db:
         pending = db.execute("""
             SELECT f.forecast_date, f.asset, f.horizon, f.model, f.recorded_utc
@@ -208,6 +210,10 @@ def score_pending(
             completed = bar_completion_utc(end, specs[asset])
             if utc_time(recorded) >= completed:
                 stats["late_excluded"] += 1
+                continue
+            # Timely issuance: part of the outcome path was already public when it was recorded.
+            if utc_time(recorded) >= bar_completion_utc(px.index[pos + 1], specs[asset]):
+                stats["stale_issue_excluded"] += 1
                 continue
             if when < completed:
                 stats["not_mature"] += 1
