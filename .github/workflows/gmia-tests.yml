@@ -28,6 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+          python -m pip install -r requirements-operations.txt
       - name: Compile modules
         working-directory: global-macro-intelligence-agent
         run: python -m compileall -q src/gmia scripts tests dashboard
@@ -37,3 +38,4 @@ jobs:
       - name: Check types in data trust boundary
         working-directory: global-macro-intelligence-agent
         run: python -m mypy --ignore-missing-imports --follow-imports=silent src/gmia/data/pit.py src/gmia/data/store.py src/gmia/evaluation/backup.py
+
