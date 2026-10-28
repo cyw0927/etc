@@ -60,3 +60,9 @@ python scripts/backup_ledger.py --destination data/backups/forward-new-unique-na
 - [별도 PR #9](https://github.com/cyw0927/etc/pull/9), base=`feature/gmia-prediction-mvp`, head=`feature/gmia-trust-architecture`. 병합하지 않았다. 후속 이슈 #3~#8 생성.
 
 데이터/실행 산출물은 로컬 프로젝트의 data와 artifacts 아래에만 보관된다. 커밋 후 검증을 기록하는 후속 문서 커밋은 위 구현/실험 커밋과 구분한다. 이 문서가 실제 만기 후 채점이나 공개 서비스 준비까지 검증됐다는 뜻은 아니다.
+
+## 작업 중 외부 원격 상태 변화
+
+최초 감사 때 열려 있던 PR #1/#2/#9가 작업 중 외부에서 병합된 상태로 바뀌었다. 에이전트는 병합 도구·명령을 호출하지 않았다. 관측한 merged_at은 UTC 기준 #1 05:49:05, #2 05:49:21, #9 05:49:28 (한국시간14:49)이다.
+
+최종 fetch 당시 main은 `ddc4b30`(#2 병합), 기존 구현 브랜치는 `433791e`(#9 병합)였다. 즉 #9 코드는 기존 기능 브랜치에만 들어갔고 main에는 아직 없다. 후속 검증 문서 `09ea42c`와 함께 **최신 main 대상 새 PR**로 인계한다. 과거 브랜치 병합을 되돌리거나 기존 PR #1/#2 설명을 수정하지 않는다. main 직접 푸시/force push도 수행하지 않았다.

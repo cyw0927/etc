@@ -57,3 +57,5 @@ flowchart TD
 ## 생성한 GitHub 작업
 
 [T1 PIT/달력 #3](https://github.com/cyw0927/etc/issues/3) · [T2 운영/복원 #4](https://github.com/cyw0927/etc/issues/4) · [T3 공식거시 #5](https://github.com/cyw0927/etc/issues/5) · [T4 재무 #6](https://github.com/cyw0927/etc/issues/6) · [T5 사건 #7](https://github.com/cyw0927/etc/issues/7) · [T6 연구/운영 gate #8](https://github.com/cyw0927/etc/issues/8). 각 이슈에 파일 범위·의존성·수용조건을 기록했다.
+
+운영 인계 갱신: 작업 중 외부에서 #1/#2/#9가 병합됐다. #9는 기존 기능 브랜치에만 반영돼 main에는 아직 없으므로, 최종 코드/문서는 최신 main을 대상으로 하는 후속 PR로 검토한다. 시간대와 SHA는 VALIDATION에 기록했다.
