@@ -19,12 +19,12 @@
 | observation_vintages | series_id+observation_period+vintage_id PK, value/null_reason, unit, release_at, revision_at, snapshot_id FK, system_valid_from, supersedes_id |
 | dataset_manifests | dataset_id PK(hash), snapshot_ids, cutoff, feature_schema_hash, label_schema_hash, calendar_version, quality_policy |
 | model_manifests | model_id PK(hash), family, config_hash, seed, training_dataset_id FK, artifact_hash, environment_hash, code_sha |
-| runs | run_id PK, dataset_id/model_manifest FK, started/finished, state, failure_reason; 完了後 append-only |
+| runs | run_id PK, dataset_id/model_manifest FK, started/finished, state, failure_reason; 완료 후 append-only |
 | forecasts / scores | v0.4 기존 기본키·최초값 유지. 이전 시 UTC 타입/FK, 발행·채점 manifest는 별도 추가 테이블 |
-| filings / financial_facts | accession+concept+unit+period+dimension+version、accepted_at、amended_from |
-| events / claims / evidence | event_id、claim_id、source_document_id、origin_cluster_id、valid/system時刻 |
+| filings / financial_facts | accession+concept+unit+period+dimension+version, accepted_at, amended_from |
+| events / claims / evidence | event_id, claim_id, source_document_id, origin_cluster_id, 유효/시스템 시각 |
 | event_impacts | event_id+대상+기간+version, 방향·강도·가정·반증·신뢰도 |
-| job_attempts / incidents | task_key+attempt、시작/종료, 입력 snapshot, error_class, 재시도 예정 |
+| job_attempts / incidents | task_key+attempt, 시작/종료, 입력 snapshot, error_class, 재시도 예정 |
 
 경제적 유효시각과 시스템이 인지한 시각의 이력을 UPDATE로 지우지 않고 신규 버전과 supersedes 관계를 추가한다.
 

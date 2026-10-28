@@ -46,3 +46,17 @@ python scripts/backup_ledger.py --destination data/backups/forward-new-unique-na
 ```
 
 테스트 basetemp는 pytest가 관리하므로 사용자 데이터가 없는 새 디렉터리만 지정한다. 실데이터 발행은 실제 현재시각만 사용하고 과거 기록을 조작하지 않는다. score는 새 데이터 수집 후 만기에 실행한다. 백업 복원은 새 경로에서 점검하고 운영 원장에 덮어쓰지 않는다.
+
+## 커밋 후 재실행과 원격 CI 확인
+
+구현 커밋: `7fe1edb102bdcf754711463c68814b05d78db07f`.
+
+- 커밋 후 전체 run `20261028T054452Z` 성공, `git_dirty=false`, Python 소스33개 SHA256 기록.
+- 동일 snapshot에서18개 forecast JSON이 최초 실행과 완전히 같음. 장부 attempted270/inserted0/duplicates270, 최초270행 그대로 보존.
+- 실제 장부 백업을 별도 경로에서 읽어 forecast270행이 원장과 완전히 같은지 확인(`True`). 합성 만기 score가 포함된 복원 검사는 단위 테스트에서 별도로 통과.
+- 최초 실데이터 실행의 역사적 significance252개에서 supported0. 재사용 홀드아웃 결과이며 새 확증 근거가 아님.
+- [CI 실행40639827392](https://github.com/cyw0927/etc/actions/runs/40639827392)에서 Ubuntu와 Windows 두 job 모두 성공. 원문 로그에서45개 테스트와 경계3파일 mypy 성공 확인.
+- 로컬 최종 테스트45 passed/17.30초. 환경: pandas3.1.0, numpy2.5.4, scikit-learn1.9.1, LightGBM4.7.0, yfinance1.7.0, pyarrow26.0.0, pytest9.2.0, mypy2.4.0.
+- [별도 PR #9](https://github.com/cyw0927/etc/pull/9), base=`feature/gmia-prediction-mvp`, head=`feature/gmia-trust-architecture`. 병합하지 않았다. 후속 이슈 #3~#8 생성.
+
+데이터/실행 산출물은 로컬 프로젝트의 data와 artifacts 아래에만 보관된다. 커밋 후 검증을 기록하는 후속 문서 커밋은 위 구현/실험 커밋과 구분한다. 이 문서가 실제 만기 후 채점이나 공개 서비스 준비까지 검증됐다는 뜻은 아니다.
