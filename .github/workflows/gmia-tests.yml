@@ -12,7 +12,10 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -31,3 +34,6 @@ jobs:
       - name: Run tests (synthetic fixtures only, no credentials)
         working-directory: global-macro-intelligence-agent
         run: python -m pytest -q
+      - name: Check types in data trust boundary
+        working-directory: global-macro-intelligence-agent
+        run: python -m mypy --ignore-missing-imports --follow-imports=silent src/gmia/data/pit.py src/gmia/data/store.py src/gmia/evaluation/backup.py
