@@ -1,9 +1,30 @@
 # GMIA — Global Macro Intelligence Agent
 
 > 실제 금융 데이터로 학습하고, **학습에 쓰지 않은 미래 구간에서 자신의 예측력을 검증하는** 개인용 글로벌 경제 예측 시스템
-> 단계: **v0.4 (전진 검증 장부 추가, 실행 검증 대기)** · 언어: 한국어 · Python 3.11+
+> 단계: **v0.4 + 데이터 신뢰 기반 (2026-10-28 실데이터 로컬 실행 확인, 실제 만기 채점 대기)** · 언어: 한국어 · Python 3.11+
 
 > ⚠️ 투자 참고용 연구 도구입니다. 매수·매도 추천이 아니며 실제 주문·자동매매 기능이 없습니다. 확률은 과거 데이터로 학습한 모델 출력이며 미래를 보장하지 않습니다.
+
+## 2026-10-28 심층 재설계·신뢰성 구현
+
+전체 GMIA의 목표와 현재 경계를 [비전](docs/architecture/VISION.md)에 정리했다. 이번 변경은 **불변 수집 스냅샷·실행 입력 추적·장부 보호·수동 백업**이며 새 예측모델이나 성능 개선 주장이 아니다.
+
+- [최신 코드 감사·위험/재현](docs/architecture/CURRENT_STATE_AUDIT.md)
+- [11개 논리 계층·Mermaid·API/화면](docs/architecture/SYSTEM_ARCHITECTURE.md)
+- [PIT/이중시간 스키마·현재 구현 경계](docs/architecture/POINT_IN_TIME_DATA_MODEL.md)
+- [공식 데이터 API·권리/인증 조사](docs/architecture/DATA_SOURCES_AND_LICENSES.md)
+- [시장/기업 재무](docs/architecture/MARKET_AND_FUNDAMENTALS.md) · [사건 파이프라인](docs/architecture/GEOPOLITICAL_EVENT_PIPELINE.md)
+- [연구·전진검증](docs/architecture/FORECASTING_AND_EVALUATION.md) · [시나리오](docs/architecture/SCENARIO_ENGINE.md)
+- [운영·백업](docs/architecture/DEPLOYMENT_AND_OPERATIONS.md) · [보안](docs/architecture/SECURITY_PRIVACY.md)
+- [의존성·수용조건별 로드맵](docs/architecture/ROADMAP.md) · [실제 실행 검증](docs/architecture/VALIDATION.md)
+
+새 수집본은 `data/raw/**/<series>.snapshot.json`과 `_snapshots/`에 저장하며 `load_series`가 해시를 확인한다. 기존 Parquet+sidecar도 `legacy_unverified`로 읽는다. 포인터가 손상되면 자동 대체하지 않는다. 스냅샷은 **수집 당시 파일의 보존**이고 과거 공개시점 PIT를 인증하지 않는다. 기본 모델의 날짜 join과 파라미터·사전등록은 유지된다.
+
+```powershell
+python scripts/backup_ledger.py --destination data/backups/forward-YYYYMMDD-HHMM.sqlite3
+```
+
+기존 백업을 덮어쓰지 않으며 DB online backup·무결성 검사를 수행한다. snapshot/모델 파일은 별도 보존한다. 장부·데이터·백업은 모두 로컬 전용이며 public Git에 올리지 않는다. 외부 배포·예약실행은 활성화하지 않았다.
 
 ## 무엇을 하나
 1. Yahoo Finance(yfinance)와 FRED에서 **실제** 일별 시장·금리 데이터를 받아 정제·저장한다.
@@ -109,7 +130,7 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 - 검증 Brier: 기준모델 약 0.217~0.255, 학습 모델 약 0.244~0.297 — 학습 모델이 일관되게 나빴다(과신된 확률). 학습 구간 안에서는 로지스틱 회귀 AUC 0.57(SPY 5일)이지만 미래 구간에서는 0.5 안팎이다.
 - 홀드아웃에서 B1을 이긴 선택 모델은 B2 두 개뿐이며 차이는 매우 작다(BTC 5일 0.2514 vs 0.2517, USD/KRW 5일 0.2483 vs 0.2501).
 - 홀드아웃에서만 좋아 보인 학습 모델도 있었지만(QQQ 20일 로지스틱 Brier 0.2100 vs B1 0.2234, AUC 0.67) 검증 구간에서는 나빴으므로 채택하지 않았다. 사후 선택은 미래정보 유출이다.
-- 파이프라인 점검: 미래 수익률에 잡음을 섞어 일부러 넣으면 모델이 홀드아웃 AUC 0.75 이상으로 잡아낸다 → 성능 부진은 배선 오류가 아니라 이 특징변수들의 실제 예측력이 약하다는 뜻이다.
+- 파이프라인 점검: 미래 수익률에 잡음을 섞어 일부러 넣으면 모델이 홀드아웃 AUC 0.75 이상으로 잡아낸다 → 일부 신호 검출 배선이 작동함을 보인 검사다. 구현 오류나 데이터 시점 누출이 전혀 없다는 증거는 아니다.
 
 → 현재 출력되는 5일·20일 상승확률은 대부분 **과거 상승비율**이며 방향 예측 신호가 아니다. 대시보드와 보고서는 이를 '참고 신뢰도 낮음'으로 명시한다. 수치는 데이터를 새로 받으면 달라진다.
 
@@ -145,7 +166,7 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 
 **한계 — 홀드아웃 재사용:** 이 홀드아웃(최근 2년)은 v0.2에서 이미 집계 결과를 봤다. 앞으로 같은 기간에 후보를 계속 추가해 시험하면 우연히 좋아 보이는 결과를 찾을 위험이 커진다. 다음 판정은 **2026-10-27 이후 데이터의 전진 검증**으로 해야 한다.
 
-## v0.4 전진 검증 장부 (구현; 아직 현지 실행 검증되지 않음)
+## v0.4 전진 검증 장부 (최초 구현 당시 기록; 최신 검증은 VALIDATION 참조)
 
 기존 v0.2·v0.3의 최근 2년 홀드아웃은 여러 번 확인했으므로 새로운 가설의 검증으로 재사용하지 않는다. v0.4는 과거 성적표를 만드는 기능이 아니라 **실제 미래를 기다렸다가 채점하는 장부**다.
 
@@ -159,7 +180,7 @@ macOS/Linux는 `python3 -m venv .venv && source .venv/bin/activate` 후 같은 �
 
 **신규 환경 재현:** 위 PowerShell 설치 후 `python scripts/run_all.py`로 먼저 실데이터를 수집하고 예측을 기록한다. 이후 적절한 시간 경과 후 `python scripts/fetch_data.py`로 **새로 수집한** 자료를 확보하고 `python scripts/score_ledger.py`로 채점한다. 단순히 과거 기록을 소급해 생성해서는 안 된다.
 
-**검증 상태:** GitHub Actions [GMIA unit tests 실행 #40429223134](https://github.com/cyw0927/etc/actions/runs/40429223134)에서 Python 3.12 패키지 설치·모듈 컴파일·`python -m pytest -q`가 **통과**했다(2026-10-27). 이 세션에는 사용자의 로컬 실데이터(`data/raw/`)가 없으므로 `run_all.py --no-fetch`, 실제 Yahoo/FRED 데이터 재수집, 신규 실제 예측 발행·만기 채점의 전체 실행은 **미검증**이다. Windows PC에서 추가 검증이 필요하다.
+**최초 구현 당시 검증 기록(최신 상태는 [VALIDATION](docs/architecture/VALIDATION.md)):** GitHub Actions [GMIA unit tests 실행 #40429223134](https://github.com/cyw0927/etc/actions/runs/40429223134)에서 Python 3.12 패키지 설치·모듈 컴파일·`python -m pytest -q`가 **통과**했다(2026-10-27). 이 세션에는 사용자의 로컬 실데이터(`data/raw/`)가 없으므로 `run_all.py --no-fetch`, 실제 Yahoo/FRED 데이터 재수집, 신규 실제 예측 발행·만기 채점의 전체 실행은 **미검증**이다. Windows PC에서 추가 검증이 필요하다.
 
 ## 폴더 구조
 ```text

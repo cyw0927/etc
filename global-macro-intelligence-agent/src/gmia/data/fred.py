@@ -1,7 +1,7 @@
 """FRED data.
 
-- Daily rates (DGS2, DGS10, DFF) come from the public fredgraph CSV (no key). Market rates are not
-  revised, so the latest file is safe for backtests when used with a one-day availability delay.
+- Daily rates (DGS2, DGS10, DFF) come from public fredgraph CSV (no key). The legacy model uses
+  a one-date lag, which does not certify exact publication timing or absence of corrections.
 - Monthly macro series ARE revised. The public CSV only has today's vintage, so it is stored for display
   and flagged analysis-only. With FRED_API_KEY set, `fetch_vintages` pulls every real-time period from
   ALFRED and `realtime_feature` reconstructs what was actually known on each past date.
@@ -53,7 +53,8 @@ def fetch_and_store_fredgraph(series_id: str, description: str, start: str, raw_
         "series_id": series_id, "description": description, "source": "FRED (fredgraph CSV)",
         "kind": kind, "fetched_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "start": s.index.min().strftime("%Y-%m-%d"), "end": s.index.max().strftime("%Y-%m-%d"), "rows": int(len(s)),
-        "vintage": "latest revised values only" if kind == "macro" else "market rate (not revised)",
+        "vintage": "latest revised values only" if kind == "macro" else "latest rates; release timing not certified",
+        "availability_status": "display_only" if kind == "macro" else "legacy_date_lag_assumption",
         "backtest_use": kind == "rates",
     }
     save_series(s.to_frame(), meta, fred_path(raw_dir, series_id, kind))

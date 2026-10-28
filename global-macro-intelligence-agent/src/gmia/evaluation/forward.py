@@ -92,6 +92,14 @@ def connect(path: Path) -> sqlite3.Connection:
         FOREIGN KEY (forecast_date, asset, horizon, model)
           REFERENCES forecasts(forecast_date, asset, horizon, model)
     );
+    CREATE TRIGGER IF NOT EXISTS forecasts_no_update BEFORE UPDATE ON forecasts
+      BEGIN SELECT RAISE(ABORT, 'forecasts are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS forecasts_no_delete BEFORE DELETE ON forecasts
+      BEGIN SELECT RAISE(ABORT, 'forecasts are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS scores_no_update BEFORE UPDATE ON scores
+      BEGIN SELECT RAISE(ABORT, 'scores are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS scores_no_delete BEFORE DELETE ON scores
+      BEGIN SELECT RAISE(ABORT, 'scores are append-only'); END;
     """)
     db.commit()
     return db
@@ -207,6 +215,9 @@ def score_pending(
             fetched = metas.get(asset, {}).get("fetched_at_utc")
             if fetched is None or utc_time(fetched) <= completed:
                 stats["stale_source"] += 1
+                continue
+            if utc_time(fetched) > when:
+                stats["invalid"] += 1
                 continue
             a, b = float(px.iloc[pos]), float(px.iloc[pos + h])
             if not np.isfinite(a) or not np.isfinite(b) or a <= 0 or b <= 0:

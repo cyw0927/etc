@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import platform
 import shutil
 import subprocess
@@ -28,18 +29,20 @@ log = get_logger("gmia.pipeline")
 
 def load_inputs(cfg: dict) -> dict:
     raw = cfg["data"]["raw_dir"]
-    prices, metas = {}, {}
+    prices, metas, provenance = {}, {}, {}
     for key in cfg["assets"]:
         loaded = market.load_asset(raw, key)
         if loaded is None:
             log.warning("no stored data for %s (run scripts/fetch_data.py)", key)
             continue
         prices[key], metas[key] = loaded
+        provenance[f"market/{key}"] = loaded[1]
     rates = {}
     for sid in cfg.get("rates", {}):
         loaded = fred.load_fred(raw, sid, "rates")
         if loaded is not None:
             rates[sid] = loaded[0].iloc[:, 0]
+            provenance[f"rates/{sid}"] = loaded[1]
     macro_rt = {}
     use_macro = cfg["modeling"].get("use_macro_vintages", "auto")
     if use_macro in ("auto", True):
@@ -47,8 +50,9 @@ def load_inputs(cfg: dict) -> dict:
             loaded = fred.load_fred(raw, sid, "macro_realtime")
             if loaded is not None:
                 macro_rt[sid] = loaded[0]
+                provenance[f"macro_realtime/{sid}"] = loaded[1]
     return {"prices": prices, "metas": metas, "rates": rates if cfg["modeling"].get("use_rates", True) else {},
-            "macro_rt": macro_rt}
+            "macro_rt": macro_rt, "provenance": provenance}
 
 
 def _git_commit() -> str | None:
@@ -56,6 +60,17 @@ def _git_commit() -> str | None:
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, text=True).strip()
     except Exception:
         return None
+
+
+def _code_state() -> dict:
+    files = sorted(p for folder in ("src", "scripts") for p in (PROJECT_ROOT / folder).rglob("*.py"))
+    hashes = {p.relative_to(PROJECT_ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in files}
+    try:
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=PROJECT_ROOT, text=True))
+    except Exception:
+        dirty = None
+    return {"git_dirty": dirty, "python_source_sha256": hashes}
 
 
 def run(cfg: dict, run_id: str | None = None) -> dict:
@@ -96,6 +111,8 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
                        "n_features": len(feats), "features": feats, "verdict": res["verdict"]})
             forecasts.append(fc)
 
+    if not summaries:
+        raise InsufficientHistory(f"No evaluable targets. Fetch real data first. Skipped: {skipped}")
     summary_all, preds_all = pd.concat(summaries), pd.concat(preds)
     sig = significance_table(preds_all, summary_all, q=cfg["validation"].get("fdr_q", 0.10))
     sig.to_csv(out_dir / "significance.csv", index=False)
@@ -129,12 +146,17 @@ def run(cfg: dict, run_id: str | None = None) -> dict:
 
     run_meta = {
         "run_id": run_id, "gmia_version": __version__, "git_commit": _git_commit(),
+        "code_state": _code_state(),
         "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "python": platform.python_version(),
         "packages": {p: version(p) for p in ("pandas", "numpy", "scikit-learn", "lightgbm", "yfinance")},
         "data": {k: {"source": v.get("source"), "start": v["quality"]["start"], "end": v["quality"]["end"],
                      "fetched_at_utc": v.get("fetched_at_utc")} for k, v in inputs["metas"].items()},
         "rates_used": sorted(inputs["rates"]), "macro_realtime_used": sorted(inputs["macro_rt"]),
+        "input_snapshots": {key: {"pointer": meta.get("_snapshot"),
+                                  "integrity": meta.get("_integrity", "unknown"),
+                                  "fetched_at_utc": meta.get("fetched_at_utc")}
+                            for key, meta in inputs["provenance"].items()},
         "macro_note": None if inputs["macro_rt"] else
             "US macro (CPI, unemployment, IP, M2) excluded from models: no release-date vintages (set FRED_API_KEY)",
         "skipped": skipped, "forward_ledger": ledger_info, "disclaimer": DISCLAIMER,
