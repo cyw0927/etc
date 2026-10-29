@@ -39,7 +39,7 @@ def compare_evidence(folder,feature_rows,decision):
             raise ValueError('official release identity, FRED value or ALFRED revision does not match: '+sid)
         if updated.date().isoformat()!=day or not (release<=updated and updated+timedelta(minutes=1)<=start<=received<=decision):
             raise ValueError('unverified publication/update/collection order: '+sid)
-        if decision-start>timedelta(hours=36):raise ValueError('FRED page too old: '+sid)
+        if decision-start>timedelta(minutes=15):raise ValueError('FRED page too old: '+sid)
         result[sid]={'official_release_reference_utc':release.isoformat(),'official_release_type':kind,'official_release_url':url,
           'fred_last_update_minute_utc':updated.isoformat(),'fred_update_precision':'minute; latest series update, not exact value publication',
           'fred_page_sha256':item['sha256'],'fred_request_started_utc':start.isoformat(),'fred_received_utc':received.isoformat(),
@@ -80,3 +80,4 @@ def main():
         report.update(insert_forecast(LEDGER,row,manifest,base['next_open_utc'],final.date()));report['issued']=bool(report['inserted']);report['ledger']=str(LEDGER)
     print(json.dumps(report,indent=2))
 if __name__=='__main__':main()
+
