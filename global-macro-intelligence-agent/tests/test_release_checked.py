@@ -27,10 +27,12 @@ def test_evidence_checks_value_hash_and_times(tmp_path,monkeypatch):
             'request_started_utc':'2026-10-29T01:00:00+00:00','received_utc':'2026-10-29T01:00:01+00:00',**parsed}
         features[sid]={'observation_date':'2026-09-01','value':float(value),'realtime_start_date':issuer.EVENTS[sid][0]}
     (folder/'manifest.json').write_text(json.dumps(manifest),encoding='utf-8')
-    now=datetime(2026,10,29,2,tzinfo=UTC)
+    now=datetime(2026,10,29,1,5,tzinfo=UTC)
     assert len(issuer.compare_evidence(folder,features,now))==4
+    with pytest.raises(ValueError):issuer.compare_evidence(folder,features,now+timedelta(minutes=20))
     wrong={**features,'M2SL':{**features['M2SL'],'value':0}}
     with pytest.raises(ValueError):issuer.compare_evidence(folder,wrong,now)
     with pytest.raises(ValueError):issuer.compare_evidence(folder,features,now-timedelta(hours=2))
     (folder/'M2SL.html').write_bytes(b'tampered')
     with pytest.raises(ValueError):issuer.compare_evidence(folder,features,now)
+
