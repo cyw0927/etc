@@ -92,6 +92,14 @@ def connect(path: Path) -> sqlite3.Connection:
         FOREIGN KEY (forecast_date, asset, horizon, model)
           REFERENCES forecasts(forecast_date, asset, horizon, model)
     );
+    CREATE TRIGGER IF NOT EXISTS forecasts_no_update BEFORE UPDATE ON forecasts
+      BEGIN SELECT RAISE(ABORT, 'forecasts are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS forecasts_no_delete BEFORE DELETE ON forecasts
+      BEGIN SELECT RAISE(ABORT, 'forecasts are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS scores_no_update BEFORE UPDATE ON scores
+      BEGIN SELECT RAISE(ABORT, 'scores are append-only'); END;
+    CREATE TRIGGER IF NOT EXISTS scores_no_delete BEFORE DELETE ON scores
+      BEGIN SELECT RAISE(ABORT, 'scores are append-only'); END;
     """)
     db.commit()
     return db
@@ -166,11 +174,13 @@ def score_pending(
 
     Late predictions and premature/stale/invalid observations remain unscored.
     Scores are immutable: future vendor revisions must never rewrite previously scored rows.
+    v0.4.1 (docs/preregistration_v0.4.1.md): a forecast recorded at or after the completion of
+    the bar FOLLOWING its forecast date is a stale issue and is never scored.
     """
     when = utc_time(now_utc or datetime.now(timezone.utc))
     specs = asset_specs(cfg)
-    stats = {"pending": 0, "scored": 0, "late_excluded": 0, "not_mature": 0,
-             "stale_source": 0, "missing_data": 0, "invalid": 0}
+    stats = {"pending": 0, "scored": 0, "late_excluded": 0, "stale_issue_excluded": 0,
+             "not_mature": 0, "stale_source": 0, "missing_data": 0, "invalid": 0}
     with db_session(path) as db:
         pending = db.execute("""
             SELECT f.forecast_date, f.asset, f.horizon, f.model, f.recorded_utc
@@ -201,12 +211,19 @@ def score_pending(
             if utc_time(recorded) >= completed:
                 stats["late_excluded"] += 1
                 continue
+            # Timely issuance: part of the outcome path was already public when it was recorded.
+            if utc_time(recorded) >= bar_completion_utc(px.index[pos + 1], specs[asset]):
+                stats["stale_issue_excluded"] += 1
+                continue
             if when < completed:
                 stats["not_mature"] += 1
                 continue
             fetched = metas.get(asset, {}).get("fetched_at_utc")
             if fetched is None or utc_time(fetched) <= completed:
                 stats["stale_source"] += 1
+                continue
+            if utc_time(fetched) > when:
+                stats["invalid"] += 1
                 continue
             a, b = float(px.iloc[pos]), float(px.iloc[pos + h])
             if not np.isfinite(a) or not np.isfinite(b) or a <= 0 or b <= 0:

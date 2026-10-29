@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from gmia.config import load_config
+from gmia.config import asset_specs, load_config
 from gmia.evaluation.forward import (
     FAMILY_SIZE, MIN_PAIRS, MODELS, append_forecasts, bar_completion_utc,
     forward_significance, read_forecasts, read_scores, score_pending,
@@ -152,3 +152,56 @@ def test_spy_and_btc_completed_bar_times_are_different():
     # 2026-10-01 SPY 16:15 New York = 20:15 UTC; BTC 00:14 next day UTC.
     assert bar_completion_utc("2026-10-01", sp["SPY"]) == _utc("2026-10-01T20:15:00")
     assert bar_completion_utc("2026-10-01", sp["BTC"]) == _utc("2026-10-02T00:14:00")
+
+
+# v0.4.1 timely-issuance rule (docs/preregistration_v0.4.1.md)
+_FRESH_SOURCE = {"SPY": {"fetched_at_utc": "2026-11-15T00:00:00+00:00"}}
+
+
+def _score(path, cfg, px):
+    return score_pending(path, cfg, {"SPY": px}, _FRESH_SOURCE, now_utc=_utc("2026-11-15T00:00:00"))
+
+
+def test_stale_issued_forecast_is_kept_but_never_scored(tmp_path):
+    cfg, _, px, path, fc = _fixture(tmp_path)
+    # forecast date Thu 10-01; next bar Fri 10-02 completes 20:15 UTC; maturity bar is 10-08
+    append_forecasts(path, [fc], {"SPY": px}, cfg, "stale", "sha",
+                     recorded_utc=_utc("2026-10-05T01:00:00"))
+    result = _score(path, cfg, px)
+    assert result["stale_issue_excluded"] == len(MODELS)
+    assert result["late_excluded"] == 0 and result["scored"] == 0
+    assert read_scores(path).empty
+    assert len(read_forecasts(path)) == len(MODELS)  # audit trail stays append-only
+    sig = forward_significance(read_scores(path))
+    assert (sig.loc[(sig["asset"] == "SPY") & (sig["horizon"] == 5), "n"] == 0).all()
+
+
+def test_timely_issue_boundary_is_next_bar_completion(tmp_path):
+    cfg, dates, px, path, fc = _fixture(tmp_path)
+    next_bar_done = bar_completion_utc(dates[1], asset_specs(cfg)["SPY"])
+    ok = dict(fc, p_up_all_models={"baseline_base_rate": 0.5})
+    append_forecasts(path, [ok], {"SPY": px}, cfg, "ok", "sha",
+                     recorded_utc=next_bar_done - timedelta(seconds=1))
+    assert _score(path, cfg, px)["scored"] == 1
+
+    path2 = tmp_path / "ledger2" / "forward.sqlite3"
+    append_forecasts(path2, [ok], {"SPY": px}, cfg, "edge", "sha", recorded_utc=next_bar_done)
+    edge = _score(path2, cfg, px)
+    assert edge["stale_issue_excluded"] == 1 and edge["scored"] == 0
+
+
+def test_friday_forecast_recorded_on_weekend_is_timely(tmp_path):
+    cfg, _, px, path, fc = _fixture(tmp_path)
+    fc["forecast_date"] = "2026-10-02"  # Friday; next bar is Monday 10-05
+    append_forecasts(path, [fc], {"SPY": px}, cfg, "weekend", "sha",
+                     recorded_utc=_utc("2026-10-04T12:00:00"))
+    result = _score(path, cfg, px)
+    assert result["scored"] == len(MODELS) and result["stale_issue_excluded"] == 0
+
+
+def test_post_maturity_record_counts_as_late_not_stale_issue(tmp_path):
+    cfg, _, px, path, fc = _fixture(tmp_path)
+    append_forecasts(path, [fc], {"SPY": px}, cfg, "late", "sha",
+                     recorded_utc=_utc("2026-10-20T00:00:00"))
+    result = _score(path, cfg, px)
+    assert result["late_excluded"] == len(MODELS) and result["stale_issue_excluded"] == 0
