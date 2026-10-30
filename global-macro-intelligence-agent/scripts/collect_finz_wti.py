@@ -11,7 +11,9 @@ from pathlib import Path
 import requests
 
 BASE = "https://api.finzdata.com"
-ROOT = Path(__file__).resolve().parents[1] / "data" / "operations" / "source_research"
+# GMIA_DATA_PROJECT lets a code-only checkout (e.g. the scheduled job's dedicated worktree) write into the
+# main project's data folder, so snapshots never split across checkouts.
+ROOT = Path(os.environ.get("GMIA_DATA_PROJECT") or Path(__file__).resolve().parents[1]) / "data" / "operations" / "source_research"
 
 
 def validate(payload, kind):
