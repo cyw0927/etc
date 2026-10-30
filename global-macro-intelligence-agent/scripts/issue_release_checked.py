@@ -6,7 +6,8 @@ from zoneinfo import ZoneInfo
 from gmia.config import PROJECT_ROOT
 from alfred_research_features import load_revisions,ROOT as RESEARCH
 from collect_fred_pages import parse,SERIES
-from issue_macro_forward import load_model,snapshot_timing,live_features,predict,insert_forecast,MODEL_HASH
+from issue_macro_forward import (load_model,snapshot_timing,input_features,predict,insert_forecast,MODEL_HASH,
+                                 ALIGNMENT,INPUT_CUTOFF_DEFINITION)
 from issue_pit_baseline import load_batch,market_snapshot,market_schedule,prepare_asset,utc
 REGISTRATION='c726a91'
 MODEL='macro_release_checked_v1'
@@ -39,6 +40,8 @@ def compare_evidence(folder,feature_rows,decision):
             raise ValueError('official release identity, FRED value or ALFRED revision does not match: '+sid)
         if updated.date().isoformat()!=day or not (release<=updated and updated+timedelta(minutes=1)<=start<=received<=decision):
             raise ValueError('unverified publication/update/collection order: '+sid)
+        # 15-minute freshness: registered in preregistration_macro_alignment.md, effective from ac68504
+        # (2026-10-29 02:14:31Z). The one earlier record was issued under the 36-hour rule of c726a91.
         if decision-start>timedelta(minutes=15):raise ValueError('FRED page too old: '+sid)
         result[sid]={'official_release_reference_utc':release.isoformat(),'official_release_type':kind,'official_release_url':url,
           'fred_last_update_minute_utc':updated.isoformat(),'fred_update_precision':'minute; latest series update, not exact value publication',
@@ -50,15 +53,17 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     for key in ('model','vintages','fred-pages','price-batch'):p.add_argument('--'+key,required=True)
     p.add_argument('--issue',action='store_true');a=p.parse_args()
-    subprocess.run(['git','merge-base','--is-ancestor',REGISTRATION,'HEAD'],cwd=PROJECT_ROOT,check=True)
+    for commit in (REGISTRATION,ALIGNMENT):subprocess.run(['git','merge-base','--is-ancestor',commit,'HEAD'],cwd=PROJECT_ROOT,check=True)
     model=load_model(a.model);folder=Path(a.vintages).resolve();events,source=load_revisions(folder);batch,info=load_batch(a.price_batch)
     now=datetime.now(timezone.utc); collection=snapshot_timing(source,now)
     if utc(model['trained_utc'])>now:raise ValueError('model training time in future')
     frame,meta=market_snapshot(batch,info,'SPY',now);base=prepare_asset('SPY',frame,meta,now)[0]
     if len(market_schedule('SPY',model['report']['to'],base['forecast_date']))<6:raise ValueError('training label not mature')
-    values,rows=live_features(events,now);checked=compare_evidence(a.fred_pages,rows,now);prob=predict(model,values)
+    # Inputs follow the training decision time (alignment c5e0f06); FRED freshness is still checked against now.
+    values,rows,input_decision=input_features(events,base['forecast_date']);checked=compare_evidence(a.fred_pages,rows,now);prob=predict(model,values)
     fred=Path(a.fred_pages).resolve()
     manifest={'model_hash':MODEL_HASH,'model_trained_utc':model['trained_utc'],'training_end':model['report']['to'],
+      'input_decision_utc':input_decision.isoformat(),'input_cutoff_definition':INPUT_CUTOFF_DEFINITION,'alignment':ALIGNMENT,
       'alfred_snapshot':folder.name,'alfred_manifest_sha256':hashlib.sha256((folder/'manifest.json').read_bytes()).hexdigest(),
       'fred_snapshot':fred.name,'fred_manifest_sha256':hashlib.sha256((fred/'manifest.json').read_bytes()).hexdigest(),
       'fred_and_release_evidence':checked,'alfred_collection':collection,'features':rows,'price_source':meta,'price_batch':batch.name,
@@ -69,11 +74,11 @@ def main():
     row={'asset':'SPY','forecast_date':base['forecast_date'],'horizon':5,'model':MODEL,'probability':prob,'anchor_price':base['anchor_price'],'input_hash':input_hash}
     report={'forecast_date':row['forecast_date'],'model':MODEL,'probability':prob,'issued':False,'official_and_fred_checks':len(checked)}
     if a.issue:
-        paths=['scripts/issue_release_checked.py','scripts/collect_fred_pages.py','docs/preregistration_release_checked.md']
+        paths=['scripts/issue_release_checked.py','scripts/collect_fred_pages.py','docs/preregistration_release_checked.md','docs/preregistration_macro_alignment.md']
         subprocess.run(['git','ls-files','--error-unmatch',*paths],cwd=PROJECT_ROOT,check=True,stdout=subprocess.DEVNULL)
         subprocess.run(['git','diff','--quiet','HEAD','--'],cwd=PROJECT_ROOT,check=True)
         final=datetime.now(timezone.utc);snapshot_timing(source,final)
-        if live_features(events,final)[1]!=rows or compare_evidence(fred,rows,final)!=checked:raise ValueError('evidence changed during issue')
+        if input_features(events,base['forecast_date'])[1]!=rows or compare_evidence(fred,rows,final)!=checked:raise ValueError('evidence changed during issue')
         manifest['collection']={'earliest_request_utc':min(utc(collection['earliest_request_utc']),*(utc(x['fred_request_started_utc']) for x in checked.values())).isoformat()}
         # Input hash is recomputed after the final collection gate is attached.
         row['input_hash']=hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest()
