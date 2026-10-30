@@ -4,7 +4,7 @@
 
 ## 1. 2026-10-28 과거 예측 재현
 
-> **2026-10-30 현재:** `scripts/replay_snapshot.py`는 커밋되지 않았다. 코드 차이 검사가 `7fe1edb` 이후 새로 추가된 파일(`features/finz_wti_pit.py` 등)까지 차이로 보고 즉시 종료하기 때문이다. 고칠 때까지 아래 명령은 이 브랜치에서 동작하지 않는다.
+> **2026-10-30 변경:** 예전에는 현재 코드로 재실행하면서, 원본 커밋 이후 코드가 바뀌었으면 중단했다. 그래서 이후 커밋이 쌓이면 실행할 수 없었다. 이제는 원본 커밋(`7fe1edb`)을 임시 git worktree로 꺼내 **원본 코드로** 재실행하고, 끝나면 worktree를 지운다. 2026-10-30 실행(`data/operations/replays/20261030T061243Z-d1e01d6f`) 결과는 270개 후보 확률 최대 차이 0.0, 장부 기록 0이다.
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\replay_snapshot.py
