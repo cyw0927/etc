@@ -15,20 +15,26 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 
+from gmia.data.sessions import close_time_for
+
 PRICE_COLS = ["open", "high", "low", "close", "adj_close"]
 
 
 def drop_incomplete_bars(
-    df: pd.DataFrame, close_tz: str, close_time: str, now_utc: datetime, buffer_minutes: int = 15
+    df: pd.DataFrame, close_tz: str, close_time: str, now_utc: datetime, buffer_minutes: int = 15,
+    asset: str | None = None,
 ) -> pd.DataFrame:
-    """Drop bars whose session had not closed (plus buffer) at `now_utc`."""
+    """Drop bars whose session had not closed (plus buffer) at `now_utc`.
+
+    `asset` enables known one-off session changes (gmia.data.sessions, e.g. KRX CSAT day).
+    """
     if df.empty:
         return df
     tz = ZoneInfo(close_tz)
-    hh, mm = (int(x) for x in close_time.split(":"))
     now_local = now_utc.astimezone(tz)
 
     def complete(d: pd.Timestamp) -> bool:
+        hh, mm = (int(x) for x in close_time_for(asset, d, close_time).split(":"))
         close_dt = datetime.combine(d.date(), time(hh, mm), tzinfo=tz) + timedelta(minutes=buffer_minutes)
         return now_local >= close_dt
 

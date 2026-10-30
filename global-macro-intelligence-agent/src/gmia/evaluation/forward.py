@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from gmia.config import AssetSpec, asset_specs, resolve
+from gmia.data.sessions import close_time_for
 from gmia.evaluation.significance import benjamini_hochberg, loss_diff_test
 from gmia.models.registry import MODEL_LABELS
 
@@ -54,7 +55,7 @@ def utc_time(value: datetime | str) -> datetime:
 def bar_completion_utc(date: str | pd.Timestamp, spec: AssetSpec) -> datetime:
     """Calendar-date bar completed only after exchange-local close + 15 minutes."""
     day = pd.Timestamp(date).date()
-    hours, minutes = map(int, spec.close_time.split(":"))
+    hours, minutes = map(int, close_time_for(spec.key, day, spec.close_time).split(":"))
     close = datetime(day.year, day.month, day.day, hours, minutes, tzinfo=ZoneInfo(spec.close_tz))
     return (close + timedelta(minutes=15)).astimezone(timezone.utc)
 

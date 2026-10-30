@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pandas_market_calendars as mcal
 from gmia.config import PROJECT_ROOT, asset_specs, load_config
+from gmia.data.sessions import apply_schedule_overrides
 from gmia.data.store import load_series
 
 ROOT=PROJECT_ROOT
@@ -72,7 +73,7 @@ def market_schedule(asset, start, end):
     if asset not in MARKETS: raise ValueError('unverified provider/session contract')
     schedule=mcal.get_calendar(MARKETS[asset]).schedule(start_date=start,end_date=end)
     if schedule.empty: raise ValueError('empty market calendar')
-    return schedule
+    return apply_schedule_overrides(MARKETS[asset],schedule)  # e.g. KRX CSAT-day 10:00-16:30
 
 
 def prepare_asset(asset, frame, meta, decision):

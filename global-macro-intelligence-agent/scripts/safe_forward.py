@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pandas_market_calendars as calendars
 import gmia.config as config
+from gmia.data.sessions import apply_schedule_overrides
 
 ROOT = config.PROJECT_ROOT
 OPS = ROOT / 'data/operations'
@@ -44,7 +45,8 @@ def expected_dates(asset, start, end):
         return pd.date_range(start,end,freq='D'), None
     if asset not in CALENDARS:
         raise ValueError('provider-specific session calendar not verified')
-    schedule = calendars.get_calendar(CALENDARS[asset]).schedule(start_date=start, end_date=end)
+    schedule = apply_schedule_overrides(CALENDARS[asset],
+                                        calendars.get_calendar(CALENDARS[asset]).schedule(start_date=start, end_date=end))
     if schedule.empty: raise ValueError('empty exchange schedule')
     return pd.DatetimeIndex(schedule.index).tz_localize(None).normalize(), schedule
 
@@ -56,8 +58,8 @@ def latest_completed_missing(asset, px, fetched):
         completed_today=fetched.hour>0 or fetched.minute>=15
         expected=(day-pd.Timedelta(days=1 if completed_today else 2)).tz_localize(None)
     elif asset in CALENDARS:
-        schedule=calendars.get_calendar(CALENDARS[asset]).schedule(
-            start_date=(fetched-timedelta(days=14)).date(),end_date=(fetched+timedelta(days=1)).date())
+        schedule=apply_schedule_overrides(CALENDARS[asset],calendars.get_calendar(CALENDARS[asset]).schedule(
+            start_date=(fetched-timedelta(days=14)).date(),end_date=(fetched+timedelta(days=1)).date()))
         done=schedule[schedule['market_close']+pd.Timedelta(minutes=15)<=pd.Timestamp(fetched)]
         if done.empty: return 'could not establish latest completed market session'
         expected=pd.Timestamp(done.index[-1]).tz_localize(None).normalize()
