@@ -73,7 +73,11 @@ def main():
         "individual": ("/v1/futures/daily", {"root": "CL", "continuous": "false", "limit": 100000}),
     }
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    folder = ROOT / ("finz-wti-" + stamp + "-" + uuid.uuid4().hex[:10])
+    name = "finz-wti-" + stamp + "-" + uuid.uuid4().hex[:10]
+    final = ROOT / name
+    # Write into a hidden ".partial" folder and publish it under its final name only after the manifest exists,
+    # so an interrupted or failed run never leaves a "finz-wti-*" folder that looks like a complete snapshot.
+    folder = ROOT / ("." + name + ".partial")
     folder.mkdir(parents=True, exist_ok=False)
     manifest = {"source": "FinzData", "model_use": False, "reason": "research only; availability timestamps and rollout evidence not verified", "responses": {}}
     payloads = {}
@@ -98,7 +102,8 @@ def main():
             json.dump(manifest, stream, indent=2, ensure_ascii=False)
             stream.flush()
             os.fsync(stream.fileno())
-        print(json.dumps({"snapshot": str(folder), "responses": manifest["responses"], "cross_checks": manifest["cross_checks"], "model_use": False}, ensure_ascii=False))
+        folder.rename(final)
+        print(json.dumps({"snapshot": str(final), "responses": manifest["responses"], "cross_checks": manifest["cross_checks"], "model_use": False}, ensure_ascii=False))
     except (requests.RequestException, ValueError, OSError) as exc:
         # Status code distinguishes e.g. 401 (key) from 429 (rate limit); never print the request/headers (API key).
         response = getattr(exc, "response", None)

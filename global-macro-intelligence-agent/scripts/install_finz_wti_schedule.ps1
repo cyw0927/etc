@@ -12,7 +12,7 @@ if (-not [Environment]::GetEnvironmentVariable('FINZDATA_API_KEY', 'User')) {
 }
 $runner = Join-Path $PSScriptRoot 'run_finz_wti.ps1'
 if (-not (Test-Path -LiteralPath $runner)) { throw 'Collector runner not found.' }
-$arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}"' -f $runner
+$arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $runner
 if ($DataProject) { $arguments += ' -DataProject "{0}"' -f $DataProject }
 if ($Python) { $arguments += ' -Python "{0}"' -f $Python }
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments
