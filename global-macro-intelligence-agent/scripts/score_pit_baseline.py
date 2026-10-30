@@ -19,6 +19,8 @@ ROOT = PROJECT_ROOT
 FORECASTS = ROOT / 'data/operations/issuance/ledger.sqlite3'
 SCORES = ROOT / 'data/operations/issuance/scores.sqlite3'
 REGISTRATION = '9b7f609'
+# Fields that define a score's result; snapshot identity and fetch times only describe where it came from.
+RESULT_FIELDS = ('forecast_run_id','probability','anchor_price','maturity_date','maturity_price','outcome','brier')
 
 
 def score_one(row, frame, meta, now):
@@ -73,6 +75,16 @@ def read_forecasts(path):
         return [dict(r) for r in db.execute('SELECT * FROM forecasts WHERE model=? ORDER BY asset,forecast_date,horizon',(MODEL,))]
 
 
+def scored_keys(path):
+    """Keys that already have a first score (read-only); they are not re-scored."""
+    if not path.is_file():
+        return set()
+    with sqlite3.connect(path.resolve().as_uri()+'?mode=ro',uri=True) as db:
+        if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='scores'").fetchone():
+            return set()
+        return {tuple(r) for r in db.execute('SELECT asset,forecast_date,horizon,model FROM scores')}
+
+
 def save_scores(path, rows, manifest, now):
     path.parent.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(path,timeout=30)
@@ -90,17 +102,29 @@ def save_scores(path, rows, manifest, now):
           CREATE TRIGGER IF NOT EXISTS run_no_delete BEFORE DELETE ON score_runs BEGIN SELECT RAISE(ABORT,'append-only'); END;
         ''')
         db.execute('BEGIN IMMEDIATE')
+        # Preregistration 9b7f609: a re-score with different inputs keeps the existing first score and is
+        # REPORTED; it must not abort the other, newly matured scores in the same run. A later snapshot
+        # (new snapshot_id/hash/fetch time) that reproduces the same result is simply "already scored".
+        new_rows, already, conflicts = [], 0, []
         for r in rows:
-            old=db.execute('SELECT forecast_run_id,probability,anchor_price,maturity_date,maturity_price,outcome,brier,snapshot_id,snapshot_hash FROM scores WHERE asset=? AND forecast_date=? AND horizon=? AND model=?', (r['asset'],r['forecast_date'],r['horizon'],r['model'])).fetchone()
-            current=tuple(r[k] for k in ('forecast_run_id','probability','anchor_price','maturity_date','maturity_price','outcome','brier','snapshot_id','snapshot_hash'))
-            if old is not None and old != current: raise ValueError('existing score differs; refusing to overwrite')
+            old=db.execute(f'SELECT {",".join(RESULT_FIELDS)} FROM scores WHERE asset=? AND forecast_date=? AND horizon=? AND model=?', (r['asset'],r['forecast_date'],r['horizon'],r['model'])).fetchone()
+            if old is None:
+                new_rows.append(r)
+                continue
+            changed=[k for k,v in zip(RESULT_FIELDS,old) if v != r[k]]
+            if changed:
+                conflicts.append({'asset':r['asset'],'forecast_date':r['forecast_date'],'horizon':r['horizon'],
+                                  'model':r['model'],'fields':changed,'kept':'existing first score'})
+            else:
+                already += 1
         run=uuid.uuid4().hex
-        db.execute('INSERT INTO score_runs VALUES(?,?,?)',(run,utc(now).isoformat(),json.dumps(manifest,sort_keys=True)))
+        db.execute('INSERT INTO score_runs VALUES(?,?,?)',(run,utc(now).isoformat(),json.dumps({**manifest,'conflicts':conflicts},sort_keys=True)))
         before=db.total_changes
-        db.executemany('''INSERT OR IGNORE INTO scores VALUES(:asset,:forecast_date,:horizon,:model,:forecast_run_id,:probability,:anchor_price,:maturity_date,:maturity_price,:outcome,:brier,:snapshot_id,:snapshot_hash,:fetched_at_utc,:ingested_at_utc,:score_run_id)''',[{**r,'score_run_id':run} for r in rows])
+        db.executemany('''INSERT INTO scores VALUES(:asset,:forecast_date,:horizon,:model,:forecast_run_id,:probability,:anchor_price,:maturity_date,:maturity_price,:outcome,:brier,:snapshot_id,:snapshot_hash,:fetched_at_utc,:ingested_at_utc,:score_run_id)''',[{**r,'score_run_id':run} for r in new_rows])
         inserted=db.total_changes-before
         db.commit()
-        return {'inserted':inserted,'duplicates':len(rows)-inserted,'score_run_id':run}
+        return {'inserted':inserted,'already_scored':already,'conflicts':conflicts,
+                'duplicates':len(rows)-inserted,'score_run_id':run}
     except Exception:
         db.rollback()
         raise
@@ -117,9 +141,13 @@ def main():
     now=datetime.now(timezone.utc)
     batch, info=load_batch(args.batch)
     forecasts=read_forecasts(FORECASTS)
-    frames={}; errors={}; rows=[]; pending=[]; blocked=[]
+    done=scored_keys(SCORES)
+    frames={}; errors={}; rows=[]; pending=[]; blocked=[]; already=0
     for f in forecasts:
         asset=f['asset']
+        if (asset,f['forecast_date'],f['horizon'],f['model']) in done:
+            already+=1
+            continue
         try:
             if asset not in frames: frames[asset]=market_snapshot(batch,info,asset,now)
             result, reason=score_one(f,*frames[asset],now)
@@ -128,7 +156,7 @@ def main():
             else: pending.append({**ident,'reason':reason})
         except Exception as exc:
             blocked.append({'asset':asset,'forecast_date':f['forecast_date'],'horizon':f['horizon'],'reason':str(exc)})
-    report={'predictions':len(forecasts),'ready':len(rows),'pending':pending,'blocked':blocked,'written':False}
+    report={'predictions':len(forecasts),'already_scored':already,'ready':len(rows),'pending':pending,'blocked':blocked,'written':False}
     if args.write and rows:
         subprocess.run(['git','ls-files','--error-unmatch','scripts/score_pit_baseline.py','docs/preregistration_v0.5_scoring.md'],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
         subprocess.run(['git','diff','--quiet','HEAD','--'],cwd=ROOT,check=True)

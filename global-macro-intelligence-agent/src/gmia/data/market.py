@@ -55,7 +55,7 @@ def fetch_asset(spec: AssetSpec, start: str, end: str | None, raw_dir: str, now_
     raw = _download(spec.ticker, start, end)
     raw.index = pd.to_datetime(raw.index).tz_localize(None) if raw.index.tz is not None else pd.to_datetime(raw.index)
     before = len(raw)
-    raw = drop_incomplete_bars(raw, spec.close_tz, spec.close_time, now_utc)
+    raw = drop_incomplete_bars(raw, spec.close_tz, spec.close_time, now_utc, asset=spec.key)
     clean, quality = clean_prices(raw)
     quality["incomplete_bars_dropped"] = before - len(raw)
     meta = {

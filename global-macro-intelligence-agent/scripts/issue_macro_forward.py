@@ -5,9 +5,11 @@ from pathlib import Path
 import numpy as np
 from gmia.config import PROJECT_ROOT
 from alfred_research_features import load_revisions,SERIES,ROOT as RESEARCH
-from issue_pit_baseline import load_batch,market_snapshot,prepare_asset,utc
+from issue_pit_baseline import load_batch,market_schedule,market_snapshot,prepare_asset,utc
 
 REGISTRATION='81a1d50'
+ALIGNMENT='c5e0f06'  # docs/preregistration_macro_alignment.md: inputs use the training decision time
+INPUT_CUTOFF_DEFINITION='anchor NYSE session close + 15 min, then ALFRED date <= that UTC date - 2 days (same as training)'
 MODEL_HASH='b08139784b0881dc2147584ed873bbb417326a231c78f2623addf28e0b1e568c'
 MODEL_NAME='macro_lag2d_fixed_v1'
 LEDGER=PROJECT_ROOT/'data/operations/macro_forward/ledger.sqlite3'
@@ -51,6 +53,18 @@ def live_features(events, decision):
                                        'exact_release_time':'unknown','eligibility':'ALFRED date plus conservative two-day lag'}
     return values,evidence
 
+def anchor_decision(forecast_date):
+    """Training decision time for an anchor session: NYSE close + 15 minutes (train_alfred_research.py)."""
+    sched=market_schedule('SPY',forecast_date,forecast_date)
+    if len(sched)!=1:raise ValueError('forecast date is not a NYSE session')
+    return utc(sched['market_close'].iloc[0].to_pydatetime())+timedelta(minutes=15)
+
+def input_features(events, forecast_date):
+    """Macro inputs for an anchor, independent of the wall-clock issue time (alignment c5e0f06)."""
+    decision=anchor_decision(forecast_date)
+    values,evidence=live_features(events,decision)
+    return values,evidence,decision
+
 def predict(model, values):
     if len(values)!=4:raise ValueError('incorrect feature count')
     p=model['parameters'];z=sum(((v-a)/b)*c for v,a,b,c in zip(values,p['mean'],p['scale'],p['coefficients']))+p['intercept'][0]
@@ -88,18 +102,18 @@ def insert_forecast(path,row,manifest,next_open,decision_date):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--model',required=True);p.add_argument('--vintages',required=True);p.add_argument('--price-batch',required=True);p.add_argument('--issue',action='store_true');a=p.parse_args()
-    subprocess.run(['git','merge-base','--is-ancestor',REGISTRATION,'HEAD'],cwd=PROJECT_ROOT,check=True)
+    for commit in (REGISTRATION,ALIGNMENT):subprocess.run(['git','merge-base','--is-ancestor',commit,'HEAD'],cwd=PROJECT_ROOT,check=True)
     model=load_model(a.model);folder=Path(a.vintages).resolve();events,source=load_revisions(folder);batch,info=load_batch(a.price_batch)
     now=datetime.now(timezone.utc);meta_timing=snapshot_timing(source,now)
     if utc(model['trained_utc'])>now:raise ValueError('model training is in the future')
     frame,meta=market_snapshot(batch,info,'SPY',now);base=prepare_asset('SPY',frame,meta,now)[0]
     if base['horizon']!=5:raise ValueError('incorrect horizon')
     # A training label must have matured by this snapshot's anchor.
-    from issue_pit_baseline import market_schedule
     sched=market_schedule('SPY',model['report']['to'],base['forecast_date'])
     if len(sched)<6:raise ValueError('training label not mature by forecast anchor')
-    values,evidence=live_features(events,now);prob=predict(model,values)
+    values,evidence,input_decision=input_features(events,base['forecast_date']);prob=predict(model,values)
     manifest={'model_hash':MODEL_HASH,'model_trained_utc':model['trained_utc'],'training_end':model['report']['to'],
+              'input_decision_utc':input_decision.isoformat(),'input_cutoff_definition':INPUT_CUTOFF_DEFINITION,'alignment':ALIGNMENT,
               'macro_manifest_hash':hashlib.sha256((folder/'manifest.json').read_bytes()).hexdigest(),'macro_snapshot':folder.name,
               'collection':meta_timing,'features':evidence,'price_source':meta,'price_batch':batch.name,
               'registration':REGISTRATION,'git_commit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=PROJECT_ROOT,text=True).strip(),
@@ -108,12 +122,12 @@ def main():
     row={'asset':'SPY','forecast_date':base['forecast_date'],'horizon':5,'model':MODEL_NAME,'probability':prob,'anchor_price':base['anchor_price'],'input_hash':fingerprint}
     report={'mode':'research_macro_forward','forecast_date':row['forecast_date'],'model':MODEL_NAME,'issued':False,'probability':prob,'warning':manifest['release_time_warning']}
     if a.issue:
-        paths=['scripts/issue_macro_forward.py','scripts/alfred_research_features.py','scripts/collect_alfred_web.py','docs/preregistration_macro_forward.md']
+        paths=['scripts/issue_macro_forward.py','scripts/alfred_research_features.py','scripts/collect_alfred_web.py','docs/preregistration_macro_forward.md','docs/preregistration_macro_alignment.md']
         subprocess.run(['git','ls-files','--error-unmatch',*paths],cwd=PROJECT_ROOT,check=True,stdout=subprocess.DEVNULL)
         subprocess.run(['git','diff','--quiet','HEAD','--'],cwd=PROJECT_ROOT,check=True)
-        # As the final minute might cross UTC midnight, recompute and demand the exact same eligible revisions.
+        # Inputs no longer depend on the wall clock; re-check them and the collection window at commit time.
         final=datetime.now(timezone.utc);snapshot_timing(source,final)
-        if live_features(events,final)[1]!=evidence:raise ValueError('vintage cutoff changed; repeat preflight')
+        if input_features(events,base['forecast_date'])[1]!=evidence:raise ValueError('vintage inputs changed; repeat preflight')
         report.update(insert_forecast(LEDGER,row,manifest,base['next_open_utc'],final.date()));report['issued']=bool(report['inserted']);report['ledger']=str(LEDGER)
     print(json.dumps(report,ensure_ascii=False,indent=2))
 if __name__=='__main__':main()

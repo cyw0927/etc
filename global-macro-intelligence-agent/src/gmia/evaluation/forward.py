@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from gmia.config import AssetSpec, asset_specs, resolve
+from gmia.data.sessions import close_time_for
 from gmia.evaluation.significance import benjamini_hochberg, loss_diff_test
 from gmia.models.registry import MODEL_LABELS
 
@@ -54,7 +55,7 @@ def utc_time(value: datetime | str) -> datetime:
 def bar_completion_utc(date: str | pd.Timestamp, spec: AssetSpec) -> datetime:
     """Calendar-date bar completed only after exchange-local close + 15 minutes."""
     day = pd.Timestamp(date).date()
-    hours, minutes = map(int, spec.close_time.split(":"))
+    hours, minutes = map(int, close_time_for(spec.key, day, spec.close_time).split(":"))
     close = datetime(day.year, day.month, day.day, hours, minutes, tzinfo=ZoneInfo(spec.close_tz))
     return (close + timedelta(minutes=15)).astimezone(timezone.utc)
 
@@ -168,7 +169,7 @@ def append_forecasts(
 
 def score_pending(
     path: Path, cfg: dict, prices: dict[str, pd.DataFrame], metas: dict[str, dict],
-    now_utc: datetime | None = None,
+    now_utc: datetime | None = None, eligible: set[tuple[str, str, int]] | None = None,
 ) -> dict:
     """Score ONLY matured forecasts using newly fetched real market data.
 
@@ -176,10 +177,12 @@ def score_pending(
     Scores are immutable: future vendor revisions must never rewrite previously scored rows.
     v0.4.1 (docs/preregistration_v0.4.1.md): a forecast recorded at or after the completion of
     the bar FOLLOWING its forecast date is a stale issue and is never scored.
+    v0.4.2 (docs/preregistration_v0.4.2.md): when `eligible` is given, only forecasts whose
+    (forecast_date, asset, horizon) passed the caller's checks are considered; others are held.
     """
     when = utc_time(now_utc or datetime.now(timezone.utc))
     specs = asset_specs(cfg)
-    stats = {"pending": 0, "scored": 0, "late_excluded": 0, "stale_issue_excluded": 0,
+    stats = {"pending": 0, "scored": 0, "held": 0, "late_excluded": 0, "stale_issue_excluded": 0,
              "not_mature": 0, "stale_source": 0, "missing_data": 0, "invalid": 0}
     with db_session(path) as db:
         pending = db.execute("""
@@ -194,6 +197,9 @@ def score_pending(
         stats["pending"] = len(pending)
         new_scores = []
         for origin, asset, h, model, recorded in pending:
+            if eligible is not None and (origin, asset, int(h)) not in eligible:
+                stats["held"] += 1
+                continue
             if asset not in prices or asset not in specs:
                 stats["missing_data"] += 1
                 continue
