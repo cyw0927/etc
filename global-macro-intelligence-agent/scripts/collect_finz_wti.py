@@ -98,7 +98,11 @@ def main():
             os.fsync(stream.fileno())
         print(json.dumps({"snapshot": str(folder), "responses": manifest["responses"], "cross_checks": manifest["cross_checks"], "model_use": False}, ensure_ascii=False))
     except (requests.RequestException, ValueError, OSError) as exc:
-        print(json.dumps({"snapshot": str(folder), "error": type(exc).__name__, "model_use": False}), file=sys.stderr)
+        # Status code distinguishes e.g. 401 (key) from 429 (rate limit); never print the request/headers (API key).
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+        print(json.dumps({"snapshot": str(folder), "error": type(exc).__name__, "http_status": status,
+                          "model_use": False}), file=sys.stderr)
         raise SystemExit(1)
 
 
