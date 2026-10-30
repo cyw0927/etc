@@ -67,8 +67,8 @@ FinzData의 [무료 이용 조건](https://finzdata.com/terms)은 개인 연구�
 - WTI 시점 검증 함수: `gmia.features.finz_wti_pit.features_at`. 수집 시각보다 이른 의사결정, 오래된 자료, 최신 두 봉 중 잠정치, 계약 변경, 평일 결측 가능성, 계약별·연속 자료 불일치와 파일 해시 불일치를 거부한다. 휴일도 결측 가능성으로 보수적으로 거부할 수 있다. 이 함수는 독립 연구용이며 기존 발행 파이프라인에 등록되어 있지 않다.
 - 스냅샷 비교: `python scripts/compare_finz_wti.py --before <이전폴더> --after <이후폴더>`는 두 수집본의 계약·가격·상태 변화를 비교한다. 변경이 발견돼도 두 수집 시각 사이에 일어났다는 사실만 알 수 있고, 정확한 공개·수정 시각을 뜻하지 않는다.
 - 자동 수집: Windows 작업 스케줄러의 `GMIA-FinzData-WTI-Research`가 매일 06:30 로컬 시각에 연구용 수집을 실행한다. 컴퓨터가 꺼져 있으면 그 시각에 실행되지 않고, 다시 가능해질 때 지연 실행된다(로그인 상태에서만 실행). 수집은 예측이나 채점을 실행하지 않는다.
-  - **코드 위치:** 2026-10-30부터 작업은 메인 작업 폴더가 아니라 **전용 git worktree `C:\dev\etc-ops`**(특정 커밋에 고정된 detached HEAD)의 `run_finz_wti.ps1`을 실행한다. `-DataProject C:\dev\etc\global-macro-intelligence-agent`로 스냅샷과 로그는 메인 프로젝트의 `data\`에 쌓인다. 그래서 메인 폴더에서 브랜치를 바꿔도 작업이 바뀌거나 깨지지 않는다. 변경 전 작업 정의는 `data\operations\logsinz_wti	ask-backup-20261030T064129Z.xml`에 백업했다.
-  - **로그:** 실행마다 `data\operations\logsinz_wtiinz-wti-<UTC>.log`에 코드·데이터 위치, 커밋, 수집기 출력, 종료 코드(0 성공, 1 수집 실패, 2 키·환경 문제, 3 수집기 없음)가 남는다. 키 값은 남지 않는다.
+  - **코드 위치:** 2026-10-30부터 작업은 메인 작업 폴더가 아니라 **전용 git worktree `C:\dev\etc-ops`**(특정 커밋에 고정된 detached HEAD)의 `run_finz_wti.ps1`을 실행한다. `-DataProject C:\dev\etc\global-macro-intelligence-agent`로 스냅샷과 로그는 메인 프로젝트의 `data\`에 쌓인다. 그래서 메인 폴더에서 브랜치를 바꿔도 작업이 바뀌거나 깨지지 않는다. 변경 전 작업 정의는 `data\operations\logs\finz_wti\task-backup-20261030T064129Z.xml`에 백업했다.
+  - **로그:** 실행마다 `data\operations\logs\finz_wti\finz-wti-<UTC>.log`에 코드·데이터 위치, 커밋, 수집기 출력, 종료 코드(0 성공, 1 수집 실패, 2 키·환경 문제, 3 수집기 없음)가 남는다. 키 값은 남지 않는다.
   - **불완전한 스냅샷:** 수집은 `.finz-wti-<id>.partial`에 쓰다가 manifest까지 끝나면 `finz-wti-<id>`로 이름을 바꾼다. 중간에 끊긴 수집은 `.partial`로 남는다.
   - **수집 코드 갱신:** 메인 폴더에서 커밋한 뒤 `git -C C:\dev\etc-ops checkout --detach <커밋>`으로 worktree를 옮긴다. 갱신하지 않으면 작업은 계속 고정된 커밋의 코드로 실행된다. 새 설치는 worktree 안에서 `scripts\install_finz_wti_schedule.ps1 -DataProject <메인 프로젝트>`로 한다(같은 이름의 기존 작업은 덮어쓰지 않음).
 - 인증: 사용자 환경변수 `FINZDATA_API_KEY`에 키를 저장했다. 이 값은 사용자 계정에서 접근 가능한 일반 환경변수이며 암호화된 비밀 저장소가 아니다. 키는 코드·Git·스냅샷에 기록하지 않는다.
