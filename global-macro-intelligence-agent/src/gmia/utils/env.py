@@ -11,7 +11,7 @@ def load_dotenv(path=None) -> None:
     path = path or PROJECT_ROOT / ".env"
     if not os.path.exists(path):
         return
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:  # Notepad may save a BOM
         for line in f:
             line = line.strip()
             if not line or line.startswith("#") or "=" not in line:

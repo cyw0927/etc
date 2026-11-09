@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dashboard = ["streamlit>=1.57"]
+agent = ["anthropic>=1.17,<2"]
 dev = ["pytest>=8", "mypy>=1.11"]
 
 [tool.setuptools.packages.find]
